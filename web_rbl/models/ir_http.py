@@ -35,22 +35,46 @@ _logger = logging.getLogger(__name__)
 
 # Muster, die eindeutig nach Sondierung aussehen. Bewusst eng gefasst:
 # Ein falsch erkannter Besucher ist teurer als eine übersehene Sonde.
+#
+# WELCHE MUSTER NUR ZÄHLEN UND WELCHE SPERREN
+# --------------------------------------------
+# Nicht jedes Muster trägt dieselbe Beweislast. ``/.env`` oder
+# ``/wp-admin`` ruft niemand versehentlich auf -- ``..`` im Pfad dagegen
+# schon: Es genügt, dass ein fremder Webmaster ein Bild relativ falsch
+# verlinkt (``/bilder/../logo.png``), und jeder Besucher SEINER Seite
+# landet bei uns auf der Sperrliste. Ein Tippfehler, kein Angriff.
+#
+# Deshalb steht bei jedem Muster, ob es sperrt oder nur zählt, und die
+# Vorgabe lässt sich je Muster über einen Systemparameter umstellen:
+#
+#     web_rbl.muster.traversal = zaehlen | sperren
+#
+# ``traversal_ziel`` ist die Ausnahme: Verzeichniswechsel ZUSAMMEN mit
+# einer lohnenden Zieldatei. Diese Verbindung hat keine harmlose
+# Lesart, und sie ist der Fall, der in unseren Protokollen tatsächlich
+# vorkommt (``/@fs/../../.env``).
+SPERREN, ZAEHLEN = "sperren", "zaehlen"
+
 MUSTER = (
-    ("traversal", re.compile(
+    ("traversal_ziel", SPERREN, re.compile(
+        r"(\.\.(/|%2f|%252f|\\)+)[^?]*"
+        r"(\.env|\.git|\.aws|\.ssh|passwd|shadow|id_rsa|"
+        r"environ|config\.|credentials|\.pem)", re.I)),
+    ("traversal", ZAEHLEN, re.compile(
         r"(\.\./|\.\.%2f|%2e%2e|%252e|\.\.\\)", re.I)),
-    ("dotenv", re.compile(
+    ("dotenv", SPERREN, re.compile(
         r"(^|/)\.env(\.|$|\?)|/\.env[a-z.]*$", re.I)),
-    ("vcs", re.compile(
+    ("vcs", SPERREN, re.compile(
         r"(^|/)\.(git|svn|hg)(/|$)", re.I)),
-    ("wordpress", re.compile(
+    ("wordpress", SPERREN, re.compile(
         r"(^|/)(wp-admin|wp-includes|wp-content|wp-login|xmlrpc\.php)", re.I)),
-    ("php", re.compile(
+    ("php", SPERREN, re.compile(
         r"\.(php[0-9]?|phtml|asp|aspx|jsp|cgi)($|\?)", re.I)),
-    ("dbtool", re.compile(
+    ("dbtool", SPERREN, re.compile(
         r"(^|/)(phpmyadmin|pma|adminer|mysqladmin)(/|$)", re.I)),
-    ("shell", re.compile(
+    ("shell", SPERREN, re.compile(
         r"(^|/)(shell|cmd|backdoor|c99|r57)\.", re.I)),
-    ("konfig", re.compile(
+    ("konfig", SPERREN, re.compile(
         r"(^|/)(config\.(json|yml|yaml|ini|bak)|\.aws/|\.ssh/|id_rsa)", re.I)),
 )
 
@@ -95,18 +119,43 @@ class IrHttp(models.AbstractModel):
 
         Eintrag = request.env["web.rbl.eintrag"].sudo()
         sperren = Parameter.get_param("web_rbl.sperren_aktiv", "0") == "1"
-        muster = cls._rbl_muster(path_info)
+
+        # 0. HAT JEMAND EINEN KANARIENWERT ABGERUFEN?
+        #
+        # Das steht VOR der Mustererkennung, weil es die schärfere
+        # Aussage ist. Ein Kanarienpfad existiert nur in einer von uns
+        # ausgelieferten Fälschung -- wer ihn abruft, hat gelesen und
+        # gehandelt. Fehlalarm ausgeschlossen.
+        Koeder = request.env["web.rbl.koeder"].sudo()
+        angebissen = Koeder.anbiss_pruefen(path_info, adresse)
+        if angebissen:
+            cls._rbl_hochrisiko(adresse, angebissen)
+            return cls._rbl_abweisen(Parameter)
+
+        muster, stufe = cls._rbl_muster(path_info, Parameter)
 
         # 1. IST DIESE ANFRAGE SELBST EINE SONDE?
         #
-        # Die wird IMMER abgewiesen, auch im Beobachtungsbetrieb. Das
-        # ist kein Sperren, sondern eine Antwort auf eine Anfrage, die
-        # es nicht besser verdient: Niemand ruft versehentlich
-        # ``/@fs/../../.env`` auf. Und genau hier liegt der Gewinn --
-        # eine Sonde kostet damit ein 403 statt einer vollstaendigen
-        # Fehlerseite mit zwei Stapelprotokollen.
+        # Wer sperrt, wird immer abgewiesen -- auch im
+        # Beobachtungsbetrieb. Das ist kein Sperren, sondern eine
+        # Antwort auf eine Anfrage, die es nicht besser verdient:
+        # Niemand ruft versehentlich ``/@fs/../../.env`` auf.
+        #
+        # Wer nur ZÄHLT, wird verbucht und durchgelassen. Das ist der
+        # Fall ``traversal``: Ein fremder Webmaster mit einem falsch
+        # gesetzten relativen Bildpfad soll seine Besucher nicht bei uns
+        # aussperren. Der Treffer steht trotzdem in der Liste -- so
+        # lässt sich nachsehen, was da eigentlich hereinkommt, bevor man
+        # ihn scharf schaltet.
         if muster:
             Eintrag.treffer_eigene_transaktion(adresse, path_info, muster)
+            if stufe != SPERREN:
+                return None
+            # Köder statt Abweisung -- nur wenn eingeschaltet und die
+            # Obergrenze je Adresse noch nicht erreicht ist.
+            koeder = cls._rbl_koeder(adresse, path_info, muster)
+            if koeder is not None:
+                return koeder
             return cls._rbl_abweisen(Parameter)
 
         # 2. EINE GEWOEHNLICHE ANFRAGE VON EINER GELISTETEN ADRESSE.
@@ -127,17 +176,84 @@ class IrHttp(models.AbstractModel):
         return None
 
     @classmethod
-    def _rbl_muster(cls, pfad):
-        """Der Name des ersten zutreffenden Musters, sonst ""."""
+    def _rbl_muster(cls, pfad, Parameter=None):
+        """(Name, Stufe) des ersten zutreffenden Musters, sonst ("", "").
+
+        Die Reihenfolge in ``MUSTER`` entscheidet: ``traversal_ziel``
+        steht vor ``traversal``, damit ``/@fs/../../.env`` als das
+        schärfere von beiden erkannt wird und nicht als der harmlose
+        Verzeichniswechsel.
+
+        Die Stufe je Muster lässt sich über einen Systemparameter
+        umstellen, ohne den Code anzufassen::
+
+            web_rbl.muster.traversal  = sperren
+            web_rbl.muster.php        = zaehlen
+        """
         pfad = pfad or ""
-        for name, regel in MUSTER:
-            if regel.search(pfad):
-                return name
-        return ""
+        for name, vorgabe, regel in MUSTER:
+            if not regel.search(pfad):
+                continue
+            stufe = vorgabe
+            if Parameter is not None:
+                gesetzt = Parameter.get_param(f"web_rbl.muster.{name}")
+                if gesetzt in (SPERREN, ZAEHLEN):
+                    stufe = gesetzt
+            return name, stufe
+        return "", ""
 
     # ------------------------------------------------------------------
     # Die Antwort
     # ------------------------------------------------------------------
+    @classmethod
+    def _rbl_hochrisiko(cls, adresse, koeder):
+        """Den Anbiss in einer eigenen Transaktion festhalten.
+
+        Wie beim Treffer: Die Anfrage bricht gleich mit ``Forbidden``
+        ab, und deren Transaktion wird zurückgerollt. Ohne eigenen
+        Cursor wäre die wichtigste Erkenntnis des ganzen Moduls die
+        einzige, die verlorengeht.
+        """
+        try:
+            Eintrag = request.env["web.rbl.eintrag"].sudo()
+            Eintrag.hochrisiko_eigene_transaktion(adresse, koeder.kanarie)
+        except Exception:  # noqa: BLE001
+            _logger.exception(
+                "Web RBL: Hochrisiko fuer %s konnte nicht vermerkt werden.",
+                adresse)
+
+    @classmethod
+    def _rbl_koeder(cls, adresse, pfad, muster):
+        """Eine Köderantwort, oder None.
+
+        Gibt eine fertige Antwort zurück; der Aufrufer reicht sie als
+        Ausnahme weiter, damit sie wie jede andere Abweisung den
+        teuren Weg über die Webseitenvorlagen umgeht.
+        """
+        Koeder = request.env["web.rbl.koeder"].sudo()
+        gebaut = Koeder.auslegen(adresse, pfad, muster)
+        if not gebaut:
+            return None
+        inhalt, typ = gebaut
+        from werkzeug.wrappers import Response as WerkzeugResponse
+        from werkzeug.exceptions import HTTPException
+
+        class _Koederantwort(HTTPException):
+            """Eine 200er-Antwort im Gewand einer Ausnahme.
+
+            ``_match`` kann nur durch eine Ausnahme aus dem normalen
+            Weg ausbrechen. Eine HTTPException mit eigener Antwort ist
+            der vorgesehene Weg dafür -- Odoo reicht sie unverändert
+            durch, ohne Vorlage und ohne Protokollzeile.
+            """
+            code = 200
+
+            def get_response(self, environ=None, scope=None):
+                return WerkzeugResponse(
+                    inhalt, status=200, content_type=typ)
+
+        return _Koederantwort()
+
     @classmethod
     def _rbl_abweisen(cls, Parameter):
         """Wie auf eine gesperrte Adresse geantwortet wird."""

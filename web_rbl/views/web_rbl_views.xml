@@ -5,7 +5,8 @@
         <field name="name">web.rbl.eintrag.list</field>
         <field name="model">web.rbl.eintrag</field>
         <field name="arch" type="xml">
-            <list decoration-danger="zustand == 'dauerhaft'"
+            <list decoration-bf="zustand == 'hochrisiko'"
+                  decoration-danger="zustand in ('dauerhaft', 'hochrisiko')"
                   decoration-warning="zustand == 'gesperrt'"
                   decoration-muted="zustand == 'frei'">
                 <field name="adresse"/>
@@ -37,12 +38,15 @@
                             invisible="zustand == 'frei'"/>
                     <button name="action_dauerhaft_sperren" type="object"
                             string="Dauerhaft sperren"
-                            invisible="zustand == 'dauerhaft'"/>
+                            invisible="zustand in ('dauerhaft', 'hochrisiko')"/>
+                    <button name="action_hochrisiko" type="object"
+                            string="Hochrisiko"
+                            invisible="zustand == 'hochrisiko'"/>
                     <button name="action_beobachten" type="object"
                             string="Nur beobachten"
                             invisible="zustand == 'beobachtet'"/>
                     <field name="zustand" widget="statusbar"
-                           statusbar_visible="beobachtet,gesperrt,dauerhaft"/>
+                           statusbar_visible="beobachtet,gesperrt,dauerhaft,hochrisiko"/>
                 </header>
                 <sheet>
                     <div class="oe_title">
@@ -65,6 +69,19 @@
                                placeholder="Warum diese Adresse freigegeben oder dauerhaft gesperrt wurde…"/>
                     </group>
                     <notebook>
+                        <page string="Köder" name="koeder"
+                              invisible="not koeder_ids">
+                            <field name="koeder_ids" readonly="1">
+                                <list decoration-danger="angebissen_am">
+                                    <field name="ausgelegt_am"/>
+                                    <field name="art"/>
+                                    <field name="pfad"/>
+                                    <field name="kanarie"/>
+                                    <field name="angebissen_am"/>
+                                    <field name="angebissen_von"/>
+                                </list>
+                            </field>
+                        </page>
                         <page string="Treffer" name="treffer">
                             <field name="treffer_ids" readonly="1">
                                 <list>
@@ -91,6 +108,8 @@
                         domain="['|', ('zustand', '=', 'dauerhaft'),
                                  '&amp;', ('zustand', '=', 'gesperrt'),
                                  ('gesperrt_bis', '&gt;', context_today().strftime('%Y-%m-%d %H:%M:%S'))]"/>
+                <filter name="f_hochrisiko" string="Hochrisiko"
+                        domain="[('zustand', '=', 'hochrisiko')]"/>
                 <filter name="f_dauerhaft" string="Dauerhaft"
                         domain="[('zustand', '=', 'dauerhaft')]"/>
                 <filter name="f_beobachtet" string="Nur beobachtet"

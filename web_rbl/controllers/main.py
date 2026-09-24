@@ -59,6 +59,38 @@ class WebRblController(http.Controller):
             ("Cache-Control", "no-store"),
         ])
 
+    @http.route("/web_rbl/liste/hochrisiko", type="http", auth="public",
+                methods=["GET"], csrf=False, save_session=False)
+    def liste_hochrisiko(self, token=None, **kw):
+        """Nur die nachweislich Aktiven.
+
+        Auf dieser Liste steht nur, wer einen Kanarienwert abgerufen hat
+        -- einen Pfad, den es ausschliesslich in einer von uns
+        ausgelieferten Faelschung gab. Hier ist kein Fehlalarm moeglich,
+        und hier gibt es keine Frist.
+
+        Getrennt von der Hauptliste, weil die Folgen andere sind: Auf
+        der grossen Liste stehen auch Adressen, die morgen jemand
+        anderem gehoeren. Diese hier kann man ohne schlechtes Gewissen
+        dauerhaft in eine Firewall haengen.
+        """
+        if not self._token_gueltig(token):
+            return request.not_found()
+        Eintrag = request.env["web.rbl.eintrag"].sudo()
+        adressen = sorted({
+            e["adresse"] for e in Eintrag.search_read(
+                [("zustand", "=", "hochrisiko")], ["adresse"])
+            if e["adresse"]})
+        text = "\n".join(adressen)
+        if text:
+            text += "\n"
+        return request.make_response(text, headers=[
+            ("Content-Type", "text/plain; charset=utf-8"),
+            ("X-Rbl-Count", str(len(adressen))),
+            ("X-Rbl-Kind", "hochrisiko"),
+            ("Cache-Control", "no-store"),
+        ])
+
     @http.route("/web_rbl/liste.json", type="http", auth="public",
                 methods=["GET"], csrf=False, save_session=False)
     def liste_json(self, token=None, **kw):
@@ -69,8 +101,9 @@ class WebRblController(http.Controller):
         Eintrag = request.env["web.rbl.eintrag"].sudo()
         jetzt = fields.Datetime.now()
         eintraege = Eintrag.search([
-            "|",
+            "|", "|",
             ("zustand", "=", "dauerhaft"),
+            ("zustand", "=", "hochrisiko"),
             "&", ("zustand", "=", "gesperrt"), ("gesperrt_bis", ">", jetzt),
         ])
         daten = [{
@@ -106,9 +139,13 @@ class WebRblController(http.Controller):
         """Die Adressen, eine je Zeile, sortiert."""
         Eintrag = request.env["web.rbl.eintrag"].sudo()
         jetzt = fields.Datetime.now()
+        # Hochrisiko gehoert AUCH auf die Hauptliste. Wer sie in eine
+        # Firewall haengt, soll die schaerfste Stufe nicht deshalb
+        # verpassen, weil es fuer sie noch eine eigene Liste gibt.
         eintraege = Eintrag.search_read([
-            "|",
+            "|", "|",
             ("zustand", "=", "dauerhaft"),
+            ("zustand", "=", "hochrisiko"),
             "&", ("zustand", "=", "gesperrt"), ("gesperrt_bis", ">", jetzt),
         ], ["adresse"], order="adresse")
         return sorted({e["adresse"] for e in eintraege if e["adresse"]})

@@ -85,6 +85,40 @@ Ohne Neustart nachziehen über die Runtime-API:
 Für nftables oder ipset dieselbe Datei — eine Adresse je Zeile, sonst
 nichts.
 
+## Köder (abgeschaltet ausgeliefert)
+
+Statt eines 403 kann das Modul auf die ersten *n* Sonden einer Adresse
+eine erfundene Antwort schicken — eine `.env`, eine `.git/config` oder
+das Wurzelverzeichnis eines Commodore 500. Ein Gerät, das nie gebaut
+wurde: Niemand kann behaupten, wir hätten ihn in etwas hineingelockt,
+was wie ein echtes System aussah.
+
+Der Zweck ist nicht Täuschung, sondern **Beweis**. In jeder Fälschung
+steckt ein Kanarienwert, der nur dort existiert:
+
+    ADMIN_PATH=/cp-8f3a2b9e
+
+Wird dieser Pfad je abgerufen, hat jemand die Fälschung gelesen und
+danach gehandelt. Fehlalarm ist ausgeschlossen — der Wert kann aus
+keiner anderen Quelle stammen. Solche Adressen wandern auf die
+Hochrisiko-Liste, ohne Frist.
+
+Kommt der Abruf von einer **anderen** Adresse als der, die den Köder
+bekam, sind die Daten weitergegeben worden. Das steht dann im Eintrag,
+samt Herkunft.
+
+    /web_rbl/liste/hochrisiko?token=…
+
+Getrennt von der Hauptliste, weil die Folgen andere sind: Auf der
+großen Liste stehen auch Adressen, die morgen jemand anderem gehören.
+Die Hochrisiko-Liste kann man ohne schlechtes Gewissen dauerhaft in
+eine Firewall hängen.
+
+**Der Köder ist ausgeschaltet ausgeliefert** (`web_rbl.koeder_aktiv = 0`).
+Er ändert das Verhalten nach außen sichtbar — statt 403 kommt 200 mit
+Inhalt —, und ein 200 auf `/.env` ist für manche Scanner selbst schon
+ein Signal. Wer das einschaltet, soll es bewusst tun.
+
 ## Systemparameter
 
 | Schlüssel | Vorgabe | Bedeutung |
@@ -93,6 +127,9 @@ nichts.
 | `web_rbl.sperren_aktiv` | `0` | Gelistete Adressen auch bei gewöhnlichen Anfragen abweisen |
 | `web_rbl.antwort` | `leise` | `leise` oder `forbidden` (beide 403) |
 | `web_rbl.token` | — | Ohne Token liefert der Endpunkt nichts |
+| `web_rbl.koeder_aktiv` | `0` | Köderantworten statt 403 |
+| `web_rbl.koeder_max` | `5` | Höchstzahl Köder je Adresse |
+| `web_rbl.muster.<name>` | — | `sperren` oder `zaehlen` je Muster |
 | `web_rbl.treffer_aufbewahrung` | `30` | Tage, bevor alte Treffer entfernt werden |
 
 Wird ein Parameter von außerhalb des laufenden Prozesses gesetzt (etwa

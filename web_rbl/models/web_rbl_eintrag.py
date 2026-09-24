@@ -46,6 +46,7 @@ class WebRblEintrag(models.Model):
         [("beobachtet", "Beobachtet"),
          ("gesperrt", "Gesperrt"),
          ("dauerhaft", "Dauerhaft gesperrt"),
+         ("hochrisiko", "Hochrisiko"),
          ("frei", "Freigegeben")],
         string="Zustand", default="beobachtet", required=True, index=True)
     treffer_anzahl = fields.Integer(
@@ -63,6 +64,8 @@ class WebRblEintrag(models.Model):
     notiz = fields.Text(string="Notiz")
     treffer_ids = fields.One2many(
         "web.rbl.treffer", "eintrag_id", string="Einzeltreffer")
+    koeder_ids = fields.One2many(
+        "web.rbl.koeder", "eintrag_id", string="Ausgelegte Köder")
 
     _adresse_eindeutig = models.Constraint(
         "unique(adresse)",
@@ -83,8 +86,9 @@ class WebRblEintrag(models.Model):
         jetzt = fields.Datetime.now()
         return bool(self.sudo().search_count([
             ("adresse", "=", adresse),
-            "|",
+            "|", "|",
             ("zustand", "=", "dauerhaft"),
+            ("zustand", "=", "hochrisiko"),
             "&", ("zustand", "=", "gesperrt"), ("gesperrt_bis", ">", jetzt),
         ], limit=1))
 
@@ -110,17 +114,52 @@ class WebRblEintrag(models.Model):
         ärgerlich, eine hängende Verbindung wäre schlimmer.
         """
         if not adresse:
-            return False
+            return self.browse()
+        kennung = False
         try:
             with self.pool.cursor() as cr:
                 eigene = api.Environment(cr, SUPERUSER_ID, {})
-                eigene["web.rbl.eintrag"].treffer_buchen(
+                eintrag = eigene["web.rbl.eintrag"].treffer_buchen(
                     adresse, pfad, muster)
+                kennung = eintrag.id if eintrag else False
                 cr.commit()
         except Exception:  # noqa: BLE001
             _logger.exception(
                 "Web RBL: Treffer fuer %s konnte nicht verbucht werden.",
                 adresse)
+            return self.browse()
+        # Im Environment des Aufrufers zurueckgeben, damit der Koeder
+        # damit weiterarbeiten kann.
+        return self.browse(kennung) if kennung else self.browse()
+
+    @api.model
+    def hochrisiko_eigene_transaktion(self, adresse, kanarie):
+        """Den Anbiss festhalten, unabhaengig von der Anfrage."""
+        if not adresse:
+            return False
+        try:
+            with self.pool.cursor() as cr:
+                eigene = api.Environment(cr, SUPERUSER_ID, {})
+                Eintrag = eigene["web.rbl.eintrag"]
+                eintrag = Eintrag.search([("adresse", "=", adresse)], limit=1)
+                if not eintrag:
+                    eintrag = Eintrag.create({
+                        "adresse": adresse,
+                        "erstmals": fields.Datetime.now(),
+                        "zustand": "beobachtet",
+                    })
+                eintrag.hochrisiko_setzen(
+                    f"Kanarienwert {kanarie} abgerufen.")
+                # Den Anbiss am Koeder im selben Cursor vermerken.
+                eigene["web.rbl.koeder"].search(
+                    [("kanarie", "=", kanarie)], limit=1).write({
+                        "angebissen_am": fields.Datetime.now(),
+                        "angebissen_von": adresse,
+                    })
+                cr.commit()
+        except Exception:  # noqa: BLE001
+            _logger.exception(
+                "Web RBL: Hochrisiko fuer %s nicht vermerkt.", adresse)
             return False
         return True
 
@@ -154,11 +193,41 @@ class WebRblEintrag(models.Model):
         # Eine einmal freigegebene Adresse bleibt frei. Wer sie von Hand
         # freigegeben hat, hatte einen Grund; ihn stillschweigend zu
         # ueberstimmen waere die schlechtere Ueberraschung.
-        if eintrag.zustand == "frei":
+        if eintrag.zustand in ("frei", "hochrisiko"):
+            # "frei" ist eine Entscheidung eines Menschen, "hochrisiko"
+            # die schaerfste Stufe - beide werden von einem weiteren
+            # Treffer nicht angetastet.
             return eintrag
 
         eintrag.sudo()._frist_fortschreiben(heute, jetzt)
         return eintrag
+
+    def hochrisiko_setzen(self, grund=""):
+        """Die schärfste Stufe: nachweislich gehandelt, nicht nur gesucht.
+
+        Wird gesetzt, wenn jemand einen Kanarienwert abgerufen hat --
+        einen Pfad, den es nur in einer von uns ausgelieferten
+        Fälschung gibt. Anders als bei der Mustererkennung ist hier
+        kein Fehlalarm möglich: Der Wert kann aus keiner anderen Quelle
+        stammen.
+
+        Deshalb gibt es hier auch keine Frist. Wer den Köder gelesen und
+        danach gehandelt hat, hat das nicht versehentlich getan.
+        """
+        for eintrag in self:
+            eintrag.write({
+                "zustand": "hochrisiko",
+                "gesperrt_bis": False,
+                "notiz": (eintrag.notiz or "") + ("\n" if eintrag.notiz else "")
+                         + (grund or "Kanarienwert abgerufen."),
+            })
+            _logger.warning(
+                "Web RBL: %s auf Hochrisiko gesetzt -- %s",
+                eintrag.adresse, grund or "Kanarienwert abgerufen")
+        return True
+
+    def action_hochrisiko(self):
+        return self.hochrisiko_setzen("Von Hand als Hochrisiko eingestuft.")
 
     def _frist_fortschreiben(self, heute, jetzt):
         """Sperre setzen oder verstetigen."""

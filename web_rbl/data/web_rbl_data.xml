@@ -26,6 +26,21 @@
             <field name="key">web_rbl.antwort</field>
             <field name="value">leise</field>
         </record>
+        <!--
+            Der Köder ist ABGESCHALTET ausgeliefert. Er ändert das
+            Verhalten nach aussen sichtbar: Statt eines 403 kommt eine
+            200er-Antwort mit erfundenem Inhalt. Wer das einschaltet,
+            soll es bewusst tun.
+        -->
+        <record id="param_koeder_aktiv" model="ir.config_parameter">
+            <field name="key">web_rbl.koeder_aktiv</field>
+            <field name="value">0</field>
+        </record>
+        <record id="param_koeder_max" model="ir.config_parameter">
+            <field name="key">web_rbl.koeder_max</field>
+            <field name="value">5</field>
+        </record>
+
         <record id="param_aufbewahrung" model="ir.config_parameter">
             <field name="key">web_rbl.treffer_aufbewahrung</field>
             <field name="value">30</field>
