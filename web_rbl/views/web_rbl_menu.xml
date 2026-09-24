@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <menuitem id="menu_web_rbl_root" name="Web RBL"
+              web_icon="web_rbl,static/description/icon.png"
+              groups="web_rbl.group_web_rbl_manager" sequence="95"/>
+    <menuitem id="menu_web_rbl_eintrag" name="Sperrliste"
+              parent="menu_web_rbl_root"
+              action="web_rbl_eintrag_action" sequence="10"/>
+    <menuitem id="menu_web_rbl_treffer" name="Treffer"
+              parent="menu_web_rbl_root"
+              action="web_rbl_treffer_action" sequence="20"/>
+</odoo>

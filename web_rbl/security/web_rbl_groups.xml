@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data noupdate="1">
+        <!--
+            In Odoo 19 gibt es kein res.groups.category_id mehr; an
+            seine Stelle ist res.groups.privilege_id getreten, das auf
+            ein eigenes Modell res.groups.privilege zeigt. Ein Modul,
+            das seine Gruppe einordnen will, bringt das Privileg mit.
+        -->
+        <record id="privilege_web_rbl" model="res.groups.privilege">
+            <field name="name">Web RBL</field>
+        </record>
+
+        <record id="group_web_rbl_manager" model="res.groups">
+            <field name="name">Verwaltung</field>
+            <field name="privilege_id" ref="privilege_web_rbl"/>
+            <field name="comment">Darf die Sperrliste einsehen, Adressen
+                freigeben und dauerhaft sperren.</field>
+        </record>
+    </data>
+</odoo>

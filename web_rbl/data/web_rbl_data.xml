@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data noupdate="1">
+        <!--
+            Vorsichtige Vorgaben. Das Modul beobachtet ab der
+            Installation, SPERRT aber nicht: web_rbl.sperren_aktiv steht
+            auf 0.
+
+            Grund: Die Schwelle "drei verschiedene Tage" ist eine
+            Annahme, solange niemand gemessen hat, wie oft dieselbe
+            Adresse wiederkommt. Bei Scannern aus Rechenzentren wechselt
+            sie oft täglich - dann griffe die Dauersperre nie, und man
+            hätte die falsche Regel scharf geschaltet.
+
+            Erst beobachten, dann in der Oberfläche einschalten.
+        -->
+        <record id="param_aktiv" model="ir.config_parameter">
+            <field name="key">web_rbl.aktiv</field>
+            <field name="value">1</field>
+        </record>
+        <record id="param_sperren_aktiv" model="ir.config_parameter">
+            <field name="key">web_rbl.sperren_aktiv</field>
+            <field name="value">0</field>
+        </record>
+        <record id="param_antwort" model="ir.config_parameter">
+            <field name="key">web_rbl.antwort</field>
+            <field name="value">leise</field>
+        </record>
+        <record id="param_aufbewahrung" model="ir.config_parameter">
+            <field name="key">web_rbl.treffer_aufbewahrung</field>
+            <field name="value">30</field>
+        </record>
+
+        <record id="cron_fristen" model="ir.cron">
+            <field name="name">Web RBL: abgelaufene Sperren zurücksetzen</field>
+            <field name="model_id" ref="model_web_rbl_eintrag"/>
+            <field name="state">code</field>
+            <field name="code">model._cron_fristen_pruefen()</field>
+            <field name="interval_number">15</field>
+            <field name="interval_type">minutes</field>
+            <field name="active" eval="True"/>
+        </record>
+        <record id="cron_treffer_aufraeumen" model="ir.cron">
+            <field name="name">Web RBL: alte Treffer entfernen</field>
+            <field name="model_id" ref="model_web_rbl_eintrag"/>
+            <field name="state">code</field>
+            <field name="code">model._cron_alte_treffer_loeschen()</field>
+            <field name="interval_number">1</field>
+            <field name="interval_type">days</field>
+            <field name="active" eval="True"/>
+        </record>
+    </data>
+</odoo>

@@ -1,0 +1,166 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <record id="web_rbl_eintrag_list" model="ir.ui.view">
+        <field name="name">web.rbl.eintrag.list</field>
+        <field name="model">web.rbl.eintrag</field>
+        <field name="arch" type="xml">
+            <list decoration-danger="zustand == 'dauerhaft'"
+                  decoration-warning="zustand == 'gesperrt'"
+                  decoration-muted="zustand == 'frei'">
+                <field name="adresse"/>
+                <field name="zustand"/>
+                <field name="treffer_anzahl" sum="Treffer gesamt"/>
+                <field name="tage_auffaellig"/>
+                <field name="erstmals"/>
+                <field name="zuletzt"/>
+                <field name="gesperrt_bis"/>
+                <field name="letzter_pfad" optional="show"/>
+                <button name="action_freigeben" type="object"
+                        string="Freigeben" icon="fa-unlock"
+                        invisible="zustand == 'frei'"/>
+                <button name="action_dauerhaft_sperren" type="object"
+                        string="Dauerhaft sperren" icon="fa-ban"
+                        invisible="zustand == 'dauerhaft'"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="web_rbl_eintrag_form" model="ir.ui.view">
+        <field name="name">web.rbl.eintrag.form</field>
+        <field name="model">web.rbl.eintrag</field>
+        <field name="arch" type="xml">
+            <form>
+                <header>
+                    <button name="action_freigeben" type="object"
+                            string="Freigeben" class="btn-primary"
+                            invisible="zustand == 'frei'"/>
+                    <button name="action_dauerhaft_sperren" type="object"
+                            string="Dauerhaft sperren"
+                            invisible="zustand == 'dauerhaft'"/>
+                    <button name="action_beobachten" type="object"
+                            string="Nur beobachten"
+                            invisible="zustand == 'beobachtet'"/>
+                    <field name="zustand" widget="statusbar"
+                           statusbar_visible="beobachtet,gesperrt,dauerhaft"/>
+                </header>
+                <sheet>
+                    <div class="oe_title">
+                        <h1><field name="adresse" readonly="1"/></h1>
+                    </div>
+                    <group>
+                        <group>
+                            <field name="treffer_anzahl"/>
+                            <field name="tage_auffaellig"/>
+                            <field name="letzter_pfad"/>
+                        </group>
+                        <group>
+                            <field name="erstmals"/>
+                            <field name="zuletzt"/>
+                            <field name="gesperrt_bis"/>
+                        </group>
+                    </group>
+                    <group string="Notiz">
+                        <field name="notiz" nolabel="1"
+                               placeholder="Warum diese Adresse freigegeben oder dauerhaft gesperrt wurde…"/>
+                    </group>
+                    <notebook>
+                        <page string="Treffer" name="treffer">
+                            <field name="treffer_ids" readonly="1">
+                                <list>
+                                    <field name="tag"/>
+                                    <field name="muster"/>
+                                    <field name="pfad"/>
+                                </list>
+                            </field>
+                        </page>
+                    </notebook>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <record id="web_rbl_eintrag_search" model="ir.ui.view">
+        <field name="name">web.rbl.eintrag.search</field>
+        <field name="model">web.rbl.eintrag</field>
+        <field name="arch" type="xml">
+            <search>
+                <field name="adresse"/>
+                <field name="letzter_pfad"/>
+                <filter name="f_gesperrt" string="Zurzeit gesperrt"
+                        domain="['|', ('zustand', '=', 'dauerhaft'),
+                                 '&amp;', ('zustand', '=', 'gesperrt'),
+                                 ('gesperrt_bis', '&gt;', context_today().strftime('%Y-%m-%d %H:%M:%S'))]"/>
+                <filter name="f_dauerhaft" string="Dauerhaft"
+                        domain="[('zustand', '=', 'dauerhaft')]"/>
+                <filter name="f_beobachtet" string="Nur beobachtet"
+                        domain="[('zustand', '=', 'beobachtet')]"/>
+                <filter name="f_frei" string="Freigegeben"
+                        domain="[('zustand', '=', 'frei')]"/>
+                <separator/>
+                <filter name="f_wiederholt" string="An mehreren Tagen auffällig"
+                        domain="[('tage_auffaellig', '&gt;', 1)]"/>
+                <group>
+                    <filter name="g_zustand" string="Zustand"
+                            context="{'group_by': 'zustand'}"/>
+                </group>
+            </search>
+        </field>
+    </record>
+
+    <record id="web_rbl_eintrag_action" model="ir.actions.act_window">
+        <field name="name">Sperrliste</field>
+        <field name="res_model">web.rbl.eintrag</field>
+        <field name="view_mode">list,form</field>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">
+                Noch keine auffälligen Adressen.
+            </p>
+            <p>
+                Hier erscheinen Adressen, die nach bekannten Schwachstellen
+                gesucht haben — <code>.env</code>, <code>.git</code>,
+                WordPress-Pfade, Verzeichniswechsel.
+            </p>
+        </field>
+    </record>
+
+    <record id="web_rbl_treffer_list" model="ir.ui.view">
+        <field name="name">web.rbl.treffer.list</field>
+        <field name="model">web.rbl.treffer</field>
+        <field name="arch" type="xml">
+            <list>
+                <field name="tag"/>
+                <field name="eintrag_id"/>
+                <field name="muster"/>
+                <field name="pfad"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="web_rbl_treffer_search" model="ir.ui.view">
+        <field name="name">web.rbl.treffer.search</field>
+        <field name="model">web.rbl.treffer</field>
+        <field name="arch" type="xml">
+            <search>
+                <field name="pfad"/>
+                <field name="eintrag_id"/>
+                <group>
+                    <filter name="g_muster" string="Muster"
+                            context="{'group_by': 'muster'}"/>
+                    <filter name="g_tag" string="Tag"
+                            context="{'group_by': 'tag'}"/>
+                    <filter name="g_adresse" string="Adresse"
+                            context="{'group_by': 'eintrag_id'}"/>
+                </group>
+            </search>
+        </field>
+    </record>
+
+    <record id="web_rbl_treffer_action" model="ir.actions.act_window">
+        <field name="name">Treffer</field>
+        <field name="res_model">web.rbl.treffer</field>
+        <field name="view_mode">list</field>
+        <field name="context">{'search_default_g_muster': 1}</field>
+    </record>
+
+</odoo>
