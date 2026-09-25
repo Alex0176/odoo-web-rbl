@@ -93,6 +93,13 @@ BEFUND = {
               "Kalender) zeigt auf diese Domain.",
     "synology": "Synology-NAS: DSM-Web-API zeigt auf diese Webseite "
                 "statt auf das NAS.",
+    "pflichtseite_fehlt": "Abruf einer Seite, die es auf diesem Server "
+                          "nicht gibt und auf die nichts verweist -- "
+                          "also geraten. ACHTUNG: Wird eine solche "
+                          "Seite angelegt, muss "
+                          "web_rbl.muster.pflichtseite_fehlt wieder "
+                          "auf 'zaehlen' stehen, sonst sperrt man "
+                          "Besucher von der eigenen neuen Seite aus.",
     "freiliste": "Diese Adresse steht auf der Freiliste und wird "
                  "deshalb nie gesperrt -- gemeldet schon. Nachsehen, "
                  "ob dort etwas klemmt oder ob der Freilisteneintrag "
@@ -503,6 +510,59 @@ class IrHttp(models.AbstractModel):
     MASCHINENSEITEN = re.compile(
         r"/(sitemap\w*|robots|\.well-known/security)([./]|$)", re.I)
 
+    # EINE SEITE, DIE ES NICHT GIBT UND AUF DIE NICHTS VERWEIST.
+    #
+    # Wer sie abruft, hat sie geraten. Auf diesem Server gibt es weder
+    # /impressum noch /datenschutz -- gemessen am 25.09.2026 ueber alle
+    # fuenf Webseiten, 404 auf jeder, und in website.page existiert
+    # keine Seite mit einem dieser Namen. Es verweist auch nichts
+    # darauf: Die Pflichtangaben stehen unter /contactus.
+    #
+    # Deshalb ist der Aufruf hier ein Ratevorgang wie /wp-admin. Der
+    # Unterschied zu einer echten Sonde ist nur, dass er hoeflicher
+    # aussieht.
+    #
+    # ABSICHTLICH NICHT DABEI: /kontakt, /contactus, /agbs, /terms.
+    # Die GIBT es, und sie werden benutzt -- 2.836 Aufrufe von
+    # /contactus und 496 von /kontakt in siebzehn Tagen, aus 999
+    # verschiedenen Adressen. Sie hier aufzunehmen hiesse, Besucher
+    # auszusperren.
+    #
+    # DIE VORGABE IST "ZAEHLEN", UND DAS MUSS SO BLEIBEN.
+    # In einer gewoehnlichen Odoo-Installation GIBT es ein Impressum;
+    # dort waere ein sperrendes Muster ein Fehlalarmgenerator. Nur wo
+    # die Seite nachweislich fehlt, ist es richtig -- und dort per
+    # Parameter:
+    #
+    #     web_rbl.muster.pflichtseite_fehlt = sperren
+    #
+    # WER DIESE SEITEN ANLEGT, MUSS DEN PARAMETER ZURUECKSTELLEN.
+    # Sonst sperrt man Besucher von der eigenen, frisch angelegten
+    # Impressumsseite aus -- und merkt es nicht, weil die Seite ja da
+    # ist und fuer einen selbst funktioniert.
+    # ``/privacy`` STEHT HIER BEWUSST NICHT.
+    #
+    # Es ist die Ausnahme, die die Regel bestaetigt: Die Seite gibt es
+    # zwar ebenfalls nicht (404 auf allen fuenf Webseiten), aber die
+    # Fusszeile ``theme_alan.alan_footer_1`` VERLINKT sie, und die
+    # nutzen drei unserer Seiten.
+    #
+    # Wer dort auf "Datenschutz" klickt, waere damit fuer 24 Stunden
+    # von allen fuenf Webseiten ausgesperrt worden -- fuer einen Klick
+    # auf einen Link, den wir selbst gesetzt haben. Das waere der
+    # schlimmste Fehlalarm, den dieses Modul bauen kann: einer, der
+    # ausgerechnet die gewissenhaften Besucher trifft.
+    #
+    # Der richtige Weg ist umgekehrt: den toten Verweis reparieren
+    # oder entfernen. Bis dahin bleibt /privacy unberuehrt.
+    #
+    # Die Lehre daraus gilt allgemein: "Es gibt die Seite nicht" ist
+    # NICHT dasselbe wie "niemand kann darauf stossen". Bevor ein
+    # weiterer Name hier hereinkommt, ist zu pruefen, ob irgendeine
+    # Ansicht ihn verlinkt.
+    FEHLENDE_SEITEN = re.compile(
+        r"/(impressum|imprint|datenschutz|legal)([./]|$)", re.I)
+
     @classmethod
     def _rbl_muster(cls, pfad, Parameter=None):
         """(Name, Stufe) des ersten zutreffenden Musters, sonst ("", "").
@@ -540,6 +600,18 @@ class IrHttp(models.AbstractModel):
                 if gesetzt in (SPERREN, ZAEHLEN, MELDEN):
                     stufe = gesetzt
             return name, stufe
+
+        # Kein Muster getroffen -- aber vielleicht eine Seite, die es
+        # hier gar nicht gibt. Diese Pruefung steht ganz unten, damit
+        # sie nie einem echten Muster vorgreift.
+        if cls.FEHLENDE_SEITEN.search(pfad):
+            stufe = ZAEHLEN
+            if Parameter is not None:
+                gesetzt = Parameter.get_param(
+                    "web_rbl.muster.pflichtseite_fehlt")
+                if gesetzt in (SPERREN, ZAEHLEN, MELDEN):
+                    stufe = gesetzt
+            return "pflichtseite_fehlt", stufe
         return "", ""
 
     # ------------------------------------------------------------------
