@@ -165,6 +165,26 @@
             <field name="active" eval="True"/>
         </record>
 
+        <!--
+            Suchmaschinen duerfen NIE gesperrt werden. Google und
+            Microsoft veroeffentlichen die Adressbereiche ihrer
+            Crawler selbst; nur so laesst sich ein echter Crawler von
+            einem Scanner unterscheiden, der sich Googlebot nennt.
+        -->
+        <record id="param_suchmaschinen_aktiv" model="ir.config_parameter">
+            <field name="key">web_rbl.suchmaschinen_aktiv</field>
+            <field name="value">1</field>
+        </record>
+        <record id="cron_suchmaschinen" model="ir.cron">
+            <field name="name">Web RBL: Suchmaschinen-Adressbereiche abgleichen</field>
+            <field name="model_id" ref="model_web_rbl_freiliste"/>
+            <field name="state">code</field>
+            <field name="code">model._cron_suchmaschinen_abgleichen()</field>
+            <field name="interval_number">1</field>
+            <field name="interval_type">days</field>
+            <field name="active" eval="True"/>
+        </record>
+
         <record id="cron_befunde_melden" model="ir.cron">
             <field name="name">Web RBL: Befunde als Ticket melden</field>
             <field name="model_id" ref="model_web_rbl_eintrag"/>
