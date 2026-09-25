@@ -134,7 +134,33 @@ class IrHttp(models.AbstractModel):
 
         muster, stufe = cls._rbl_muster(path_info, Parameter)
 
-        # 1. IST DIESE ANFRAGE SELBST EINE SONDE?
+        # 1. IST DIE ADRESSE SCHON GESPERRT? DANN SOFORT UND BILLIG.
+        #
+        # Diese Abfrage steht hier, weil das Verbuchen darunter eine
+        # EIGENE Datenbankverbindung öffnet. Am 25.09.2026 um 05:57 hat
+        # eine einzelne Adresse 195 Sonden in einer Minute geschickt --
+        # also 195 zusätzliche Verbindungen. Der Verbindungspool war
+        # erschöpft, und danach scheiterten 28 Anfragen mit
+        # ``PoolError: The Connection Pool Is Full``. Darunter waren
+        # ECHTE BESUCHER, denn sie teilen sich denselben Pool.
+        #
+        # Das Abwehrmodul hat den Angriff damit in eine Störung
+        # verwandelt -- genau das, was es verhindern soll. Der Angreifer
+        # kam nicht herein, aber er hat die Seite lahmgelegt.
+        #
+        # Ist die Adresse bereits gesperrt, ist alles Nötige bekannt.
+        # Jeder weitere Treffer kostet eine Verbindung und bringt
+        # nichts: Die Sperre steht, die Frist läuft, die Muster sind
+        # erfasst. Also wird hier abgewiesen, ohne zu verbuchen.
+        #
+        # Die Abfrage selbst läuft auf dem Cursor der Anfrage und kostet
+        # keine zusätzliche Verbindung.
+        if Eintrag.ist_gesperrt(adresse):
+            if sperren or muster:
+                return cls._rbl_abweisen(Parameter)
+            return None
+
+        # 2. IST DIESE ANFRAGE SELBST EINE SONDE?
         #
         # Wer sperrt, wird immer abgewiesen -- auch im
         # Beobachtungsbetrieb. Das ist kein Sperren, sondern eine
@@ -158,21 +184,9 @@ class IrHttp(models.AbstractModel):
                 return koeder
             return cls._rbl_abweisen(Parameter)
 
-        # 2. EINE GEWOEHNLICHE ANFRAGE VON EINER GELISTETEN ADRESSE.
-        #
-        # Sie zu blockieren ist der eigentliche Eingriff -- und deshalb
-        # geschieht er nur, wenn das Sperren ausdruecklich eingeschaltet
-        # ist. Im Beobachtungsbetrieb laeuft sie durch.
-        #
-        # Diese Unterscheidung war im ersten Entwurf nicht da, und sie
-        # fehlte an genau der falschen Stelle: Nach der ersten Sonde
-        # bekam dieselbe Adresse auf ``/web/login`` ebenfalls ein 403,
-        # obwohl das Sperren auf "aus" stand. Wer den Beobachtungs-
-        # betrieb waehlt, will beobachten, nicht heimlich sperren.
-        if not sperren:
-            return None
-        if Eintrag.ist_gesperrt(adresse):
-            return cls._rbl_abweisen(Parameter)
+        # 3. Eine gewoehnliche Anfrage von einer noch nicht gesperrten
+        #    Adresse: nichts zu tun. Der Fall "gelistet" ist oben unter
+        #    Punkt 1 bereits erledigt.
         return None
 
     @classmethod
