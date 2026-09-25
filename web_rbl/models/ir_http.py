@@ -264,6 +264,73 @@ MUSTER = (
         r"^/api/v[0-9]+/|/web/webclient/version_info", re.I)),
     # -------------------------------------------------------------------
 
+    # ---- GEHEIMNISSE, DIE ES AUF KEINEM WEBSERVER GEBEN DARF --------
+    #
+    # Diese Dateien enthalten Zugangsdaten zu FREMDEN Systemen:
+    # Google-Dienstkonten, Firebase-Verwaltungsschluessel,
+    # Cloud-Speicher, Paketverwaltungen. Wer sie findet, hat nicht
+    # diese Webseite, sondern die Infrastruktur dahinter.
+    #
+    # Gemessen am 25.09.2026 ueber siebzehn Tage, je mit der Zahl der
+    # VERSCHIEDENEN Adressen -- die zweite Zahl ist die wichtigere,
+    # denn sie zeigt, dass es kein einzelner Scanner ist:
+    #     454 /.git-credentials        von 92 Adressen
+    #     411 /credentials.json        von 98
+    #     388 /service-account.json    von 89
+    #     383 /key.json                von 88
+    #     383 /rclone.conf             von 64
+    #     377 /firebase-adminsdk.json  von 88
+    ("cloudschluessel", SPERREN, re.compile(
+        r"(^|/)("
+        r"credentials\.json|service[-_]account([-_][a-z0-9]+)?\.json|"
+        r"key\.json|firebase[-_]adminsdk[^/]*\.json|"
+        r"gcloud[^/]*\.json|client[-_]secret[^/]*\.json|"
+        r"rclone\.conf|\.git-credentials|\.netrc|\.npmrc|\.pypirc|"
+        r"secrets?\.(json|ya?ml|txt)|\.htpasswd"
+        r")($|\?)", re.I)),
+
+    # ---- BAUANWEISUNGEN UND IHRE GEHEIMNISSE ------------------------
+    #
+    # Ablaufdateien der Bausysteme. Sie gehoeren ins Quellverzeichnis,
+    # nicht auf einen Webserver -- und sie nennen Registraturen,
+    # Zielsysteme und oft genug Schluesselnamen.
+    #     375 /.github/workflows/deploy.yml  von 77 Adressen
+    #     362 /.gitlab-ci.yml                von 71
+    ("bauanweisung", SPERREN, re.compile(
+        # Zwei Gruppen mit UNTERSCHIEDLICHEM Abschluss. Verzeichnisse
+        # duerfen einen Dateinamen hinter sich haben
+        # (/.github/workflows/deploy.yml), Dateinamen nicht -- sonst
+        # wuerde "Dockerfile" auch in "DockerfileLesen" treffen.
+        r"(^|/)(\.github/|\.circleci/|\.gitea/workflows/)"
+        r"|(^|/)(\.gitlab-ci\.ya?ml|\.travis\.ya?ml|Jenkinsfile|"
+        r"docker-compose[^/]*\.ya?ml|Dockerfile)($|/|\?)", re.I)),
+
+    # ---- GRAPHQL ----------------------------------------------------
+    #
+    # Odoo liefert kein GraphQL aus. Jede dieser Anfragen sucht eine
+    # Schnittstelle, die es hier nicht gibt.
+    #     590 /graphql      von 70 Adressen
+    #     580 /api/graphql  von 64
+    #     574 /v1/graphql   von 63
+    ("graphql", SPERREN, re.compile(
+        r"(^|/)(graphql|graphiql|altair)($|/|\?)", re.I)),
+
+    # ---- DIE NEUE GENERATION ----------------------------------------
+    #
+    # Ziele, die es vor zwei Jahren noch nicht gab: Schnittstellen von
+    # KI-Werkzeugen und Aufgabenwarteschlangen. ``/api/fs/exec`` ist
+    # kein Lesezugriff, sondern ein Ausfuehrungsversuch.
+    #     441 /__vite_rsc_findSourceMapURL  von 36 Adressen
+    #     381 /mcp                          von 60
+    #     370 /api/inngest, 369 /inngest
+    #     369 /api/fs/exec                  von 54
+    ("werkzeugkette", SPERREN, re.compile(
+        r"(^|/)("
+        r"mcp|api/fs/(exec|read|write)|api/inngest|inngest|"
+        r"__vite_[a-z_]+|\.vite/|api/designer/v[0-9]+/|"
+        r"api/templates/preview"
+        r")($|/|\?)", re.I)),
+
     ("dbtool", SPERREN, re.compile(
         r"(^|/)(phpmyadmin|pma|adminer|mysqladmin)(/|$)", re.I)),
     ("shell", SPERREN, re.compile(
