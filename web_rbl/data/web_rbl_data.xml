@@ -85,6 +85,32 @@
             <field name="value">10</field>
         </record>
 
+        <!--
+            Verhaltenserkennung: viele Fehlschlaege ohne Erfolge.
+            Die Zahlen sind an siebzehn Tagen Echtverkehr gemessen,
+            nicht geschaetzt. Siehe web_rbl_scanner.py.
+        -->
+        <record id="param_scanner_aktiv" model="ir.config_parameter">
+            <field name="key">web_rbl.scanner_aktiv</field>
+            <field name="value">1</field>
+        </record>
+        <record id="param_scanner_fenster" model="ir.config_parameter">
+            <field name="key">web_rbl.scanner_fenster</field>
+            <field name="value">300</field>
+        </record>
+        <record id="param_scanner_fehler" model="ir.config_parameter">
+            <field name="key">web_rbl.scanner_fehler</field>
+            <field name="value">20</field>
+        </record>
+        <record id="param_scanner_erfolge" model="ir.config_parameter">
+            <field name="key">web_rbl.scanner_erfolge</field>
+            <field name="value">2</field>
+        </record>
+        <record id="param_muster_scanner" model="ir.config_parameter">
+            <field name="key">web_rbl.muster.scanner</field>
+            <field name="value">sperren</field>
+        </record>
+
         <record id="param_aufbewahrung" model="ir.config_parameter">
             <field name="key">web_rbl.treffer_aufbewahrung</field>
             <field name="value">30</field>

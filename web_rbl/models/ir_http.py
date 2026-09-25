@@ -119,6 +119,11 @@ BEFUND = {
     "odoo_dbverwalter": "Abruf des Datenbankverwalters. Wer den sucht, "
                         "weiss, dass hier Odoo laeuft -- und sucht "
                         "das Hauptkennwort.",
+    "scanner": "Am VERHALTEN erkannt, nicht an einem bekannten Pfad: "
+               "viele Fehlschlaege in kurzer Zeit und dabei so gut wie "
+               "keine erfolgreichen Seitenaufrufe. So werden auch "
+               "Sondierungen gefunden, fuer die es kein Muster gibt -- "
+               "und das sind die meisten.",
     "freiliste": "Diese Adresse steht auf der Freiliste und wird "
                  "deshalb nie gesperrt -- gemeldet schon. Nachsehen, "
                  "ob dort etwas klemmt oder ob der Freilisteneintrag "

@@ -4,5 +4,6 @@ from . import web_rbl_freiliste
 from . import web_rbl_eintrag
 from . import web_rbl_koeder
 from . import ir_http
+from . import web_rbl_scanner
 from . import res_users
 from . import rpc_wacht
