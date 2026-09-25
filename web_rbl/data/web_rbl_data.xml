@@ -41,6 +41,50 @@
             <field name="value">5</field>
         </record>
 
+        <!--
+            Gescheiterte Anmeldungen und Anmeldeversuche ohne gueltiges
+            Sitzungsmerkmal.
+
+            Die Schwelle 10 ist bewusst dieselbe wie Odoos eigene
+            (base.login_cooldown_after). Der Unterschied liegt nicht in
+            der Zahl, sondern darin, was danach passiert: Odoo laesst
+            eine Minute Pause eintreten und vergisst den Stand beim
+            naechsten Neustart, hier bleibt er stehen.
+
+            Warum ueberhaupt eine Schwelle: Von neun gescheiterten
+            Anmeldungen in siebzehn Tagen waren acht Tippfehler eigener
+            Mitarbeiter. Eine Sperre beim ersten Fehlversuch haette
+            fast nur Kollegen getroffen.
+        -->
+        <record id="param_anmeldung_aktiv" model="ir.config_parameter">
+            <field name="key">web_rbl.anmeldung_aktiv</field>
+            <field name="value">1</field>
+        </record>
+        <record id="param_muster_anmeldung" model="ir.config_parameter">
+            <field name="key">web_rbl.muster.anmeldung</field>
+            <field name="value">sperren</field>
+        </record>
+        <record id="param_schwelle_anmeldung" model="ir.config_parameter">
+            <field name="key">web_rbl.schwelle.anmeldung</field>
+            <field name="value">10</field>
+        </record>
+        <record id="param_muster_anmeldung_bot" model="ir.config_parameter">
+            <field name="key">web_rbl.muster.anmeldung_bot</field>
+            <field name="value">sperren</field>
+        </record>
+        <record id="param_csrf_aktiv" model="ir.config_parameter">
+            <field name="key">web_rbl.csrf_aktiv</field>
+            <field name="value">1</field>
+        </record>
+        <record id="param_muster_csrf" model="ir.config_parameter">
+            <field name="key">web_rbl.muster.csrf</field>
+            <field name="value">sperren</field>
+        </record>
+        <record id="param_schwelle_csrf" model="ir.config_parameter">
+            <field name="key">web_rbl.schwelle.csrf</field>
+            <field name="value">10</field>
+        </record>
+
         <record id="param_aufbewahrung" model="ir.config_parameter">
             <field name="key">web_rbl.treffer_aufbewahrung</field>
             <field name="value">30</field>

@@ -100,6 +100,25 @@ BEFUND = {
                           "web_rbl.muster.pflichtseite_fehlt wieder "
                           "auf 'zaehlen' stehen, sonst sperrt man "
                           "Besucher von der eigenen neuen Seite aus.",
+    "anmeldung": "Gescheiterte Anmeldungen. Odoos eigener Zaehler "
+                 "liegt im Arbeitsspeicher und faellt bei jedem "
+                 "Neustart auf null; dieser hier nicht. Nachsehen, ob "
+                 "der Benutzername im Pfadvermerk nach einem Kollegen "
+                 "oder nach einem Woerterbuch aussieht.",
+    "anmeldung_bot": "Weitergeklopft, obwohl Odoo bereits "
+                     "\"bitte kurz warten\" geantwortet hatte. Wer "
+                     "diese Meldung liest, wartet -- wer sie nicht "
+                     "liest, ist kein Mensch. Dieses Muster sperrt "
+                     "sofort und kann keinen Kollegen treffen: Dafuer "
+                     "braucht es erst zehn Fehlversuche UND danach "
+                     "weitermachen.",
+    "csrf": "Anmeldeversuch ohne gueltiges Sitzungsmerkmal. Ein "
+            "Browser schickt es immer mit -- ein Skript, das direkt "
+            "postet, nicht. Kommt so ein Versuch in Serie, ist es "
+            "kein abgelaufenes Anmeldefenster.",
+    "odoo_dbverwalter": "Abruf des Datenbankverwalters. Wer den sucht, "
+                        "weiss, dass hier Odoo laeuft -- und sucht "
+                        "das Hauptkennwort.",
     "freiliste": "Diese Adresse steht auf der Freiliste und wird "
                  "deshalb nie gesperrt -- gemeldet schon. Nachsehen, "
                  "ob dort etwas klemmt oder ob der Freilisteneintrag "
@@ -213,6 +232,38 @@ MUSTER = (
     # Sonden aus den Neunzigern, die bis heute jeder Scanner mitfuehrt.
     ("cgi", SPERREN, re.compile(
         r"\.(cgi|pl)($|\?|/)", re.I)),
+    # ---- ERKUNDUNG EINER ODOO-INSTANZ -------------------------------
+    #
+    # Die Muster oben treffen jeden Server. Diese hier treffen nur
+    # den, der WEISS, dass hier Odoo laeuft -- und das ist die
+    # schaerfere Aussage.
+    #
+    # Gemessen am 25.09.2026 im Protokoll von siebzehn Tagen: Eine
+    # Adresse fragte in sechs Minuten ``/web/database/list`` ab, holte
+    # ``/api/v1/version`` und meldete sich danach 25 mal ueber
+    # ``/xmlrpc/2/common`` an. Keine Streuung, sondern jemand mit
+    # einem Plan. Auf keiner Liste stand sie.
+    #
+    # ``/web/database/manager`` liefert ausserdem 43 KB mit einem
+    # Formularfeld ``master_pwd`` -- auch bei abgeschaltetem
+    # Datenbankverwalter ("has been disabled by the administrator").
+    # Das ist ein Fingerabdruck und ein billiges Verstaerkungsziel
+    # zugleich.
+    ("odoo_dbverwalter", SPERREN, re.compile(
+        r"/web/database/(manager|selector|create|duplicate|drop|"
+        r"backup|restore|change_password)", re.I)),
+    # ``list`` nur ZAEHLEN: Der Endpunkt ist bei uns durch
+    # ``list_db = False`` ohnehin gesperrt, und manche redlichen
+    # Werkzeuge fragen ihn beim Verbinden. Was er verraet, verraet er
+    # schon heute nicht.
+    ("odoo_dbliste", ZAEHLEN, re.compile(
+        r"/web/database/list($|\?)", re.I)),
+    # Ein Versionsabruf ist fuer sich harmlos. Er steht hier, damit er
+    # in der Liste auftaucht, wenn daneben etwas anderes passiert.
+    ("odoo_fingerabdruck", ZAEHLEN, re.compile(
+        r"^/api/v[0-9]+/|/web/webclient/version_info", re.I)),
+    # -------------------------------------------------------------------
+
     ("dbtool", SPERREN, re.compile(
         r"(^|/)(phpmyadmin|pma|adminer|mysqladmin)(/|$)", re.I)),
     ("shell", SPERREN, re.compile(
@@ -244,6 +295,95 @@ class IrHttp(models.AbstractModel):
         if antwort is not None:
             raise antwort
         return super()._match(path_info)
+
+    # ------------------------------------------------------------------
+    # Anmeldeversuche, die nie bei der Kennwortpruefung ankommen
+    # ------------------------------------------------------------------
+    ANMELDEWEGE = re.compile(
+        r"^/(web/login|web/session/authenticate|web/signup|"
+        r"web/reset_password|xmlrpc)", re.I)
+
+    @classmethod
+    def _handle_error(cls, exception):
+        """Einen abgewiesenen Anmeldeversuch mitbekommen.
+
+        DIE LUECKE, DIE DAS SCHLIESST
+        ------------------------------
+        Am 12.-14.09.2026 hat eine Adresse 18 mal auf ``/web/login``
+        gepostet. Jeder dieser Versuche scheiterte an der
+        CSRF-Pruefung, also VOR der Kennwortpruefung. Folge:
+
+        * Odoos eigener Fehlversuchszaehler blieb auf null, denn er
+          zaehlt erst in ``_login``.
+        * Im Protokoll steht keine einzige Zeile "Login failed".
+        * Die Mustererkennung sah nur ``/web/login`` -- einen voellig
+          gewoehnlichen Pfad.
+
+        Der Angriff war damit fuer jede unserer Abwehren unsichtbar,
+        und die Adresse stand auf keiner Liste. Gefunden wurde er erst,
+        weil jemand nach HTTP 400 auf einem Anmeldeweg gesucht hat.
+
+        WARUM DAS KEIN FEHLALARM WIRD
+        ------------------------------
+        Ein gewoehnlicher Browser schickt das Merkmal immer mit; es
+        steht im Formular, das er gerade geladen hat. Fehlt es oder ist
+        es falsch, gibt es genau zwei Erklaerungen: eine abgelaufene
+        Sitzung -- jemand hatte die Anmeldemaske sehr lange offen --
+        oder ein Skript, das direkt postet, ohne die Seite zu holen.
+
+        Das erste ist selten und einmalig, das zweite haeufig und in
+        Serie. Genau dafuer gibt es die Schwelle: ``zaehlen`` bis
+        ``web_rbl.schwelle.csrf`` erreicht ist, dann sperren. Wer sich
+        einmal vertut, merkt nichts.
+        """
+        try:
+            cls._rbl_anmeldefehler_pruefen(exception)
+        except Exception:  # noqa: BLE001
+            # Wie ueberall in diesem Modul: Was hier schiefgeht, darf
+            # die Fehlerbehandlung von Odoo nicht mitnehmen. Eine
+            # kaputte Fehlerseite waere schlimmer als ein uebersehener
+            # Anmeldeversuch.
+            _logger.exception(
+                "Web RBL: Anmeldefehler konnte nicht geprueft werden.")
+        return super()._handle_error(exception)
+
+    @classmethod
+    def _rbl_anmeldefehler_pruefen(cls, exception):
+        from werkzeug.exceptions import BadRequest
+        if not isinstance(exception, BadRequest):
+            return
+        if not request or not request.env:
+            return
+        pfad = ""
+        try:
+            pfad = request.httprequest.path or ""
+        except Exception:  # noqa: BLE001
+            return
+        if not cls.ANMELDEWEGE.match(pfad):
+            return
+
+        Parameter = request.env["ir.config_parameter"].sudo()
+        if Parameter.get_param("web_rbl.aktiv", "1") != "1":
+            return
+        if Parameter.get_param("web_rbl.csrf_aktiv", "1") != "1":
+            return
+
+        Herkunft = request.env["web.rbl.herkunft"].sudo()
+        adresse = Herkunft.adresse()
+        if not adresse or not Herkunft.sperrbar(adresse):
+            return
+
+        stufe = Parameter.get_param("web_rbl.muster.csrf", "sperren")
+        if stufe not in (SPERREN, ZAEHLEN, MELDEN):
+            stufe = SPERREN
+        try:
+            host = (request.httprequest.host or "")[:120]
+            kennung = (request.httprequest.headers.get("User-Agent")
+                       or "")[:255]
+        except Exception:  # noqa: BLE001
+            host, kennung = "", ""
+        request.env["web.rbl.eintrag"].sudo().treffer_eigene_transaktion(
+            adresse, pfad[:255], "csrf", host, stufe, kennung)
 
     # ------------------------------------------------------------------
     @classmethod

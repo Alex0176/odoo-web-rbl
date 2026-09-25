@@ -33,6 +33,18 @@ _logger = logging.getLogger(__name__)
 SPERRE_STUNDEN = 24
 TAGE_BIS_DAUERHAFT = 3
 
+# Wie viele Treffer DESSELBEN Musters es braucht, bevor gesperrt wird.
+# 0 heisst sofort -- das ist die richtige Antwort fuer eine Sonde, die
+# niemand versehentlich abschickt.
+#
+# Anders bei Anmeldungen: Von neun gescheiterten Anmeldungen in
+# siebzehn Tagen waren acht Tippfehler eigener Mitarbeiter. Die Zahl
+# 10 ist bewusst dieselbe wie Odoos ``base.login_cooldown_after``.
+SCHWELLE_VORGABE = {
+    "anmeldung": 10,
+    "csrf": 10,
+}
+
 
 class WebRblEintrag(models.Model):
     _name = "web.rbl.eintrag"
@@ -373,6 +385,53 @@ class WebRblEintrag(models.Model):
         # der naechste Treffer kommt dann mit einem Sperrmuster, laeuft
         # an dieser Stelle vorbei und schreibt die Frist fort. Ein
         # defektes NAS schuetzt niemanden, der daneben ``/.env`` sucht.
+        # EINE SCHWELLE JE MUSTER: ZAEHLEN, DANN SPERREN.
+        #
+        # Nicht jedes Muster darf beim ersten Mal sperren. Wer
+        # ``/.env`` abruft, hat sich beim ersten Versuch zu erkennen
+        # gegeben -- wer sich einmal vertippt, nicht.
+        #
+        # Gemessen ueber siebzehn Tage: neun gescheiterte Anmeldungen,
+        # davon acht Tippfehler eigener Mitarbeiter (einer hat sein
+        # Kennwort ins Benutzerfeld getippt). Eine Sperre beim ersten
+        # Fehlversuch haette also fast nur Kollegen getroffen.
+        #
+        #     web_rbl.schwelle.anmeldung = 10
+        #
+        # Ohne Eintrag gilt 0, also das bisherige Verhalten: sofort.
+        # Gezaehlt werden Treffer DESSELBEN Musters; wer sich zehnmal
+        # vertippt und daneben ``/.env`` sucht, wird von der Sonde
+        # gesperrt und nicht von den Tippfehlern.
+        if stufe == SPERREN and muster:
+            # DIE VORGABE STEHT IM CODE, NICHT NUR IN DEN DATEN.
+            #
+            # Ein Datensatz in data/ ist eine Bequemlichkeit -- er kann
+            # fehlen, weil das Modul aktualisiert wurde, bevor der
+            # Datenbankstand nachgezogen war. Genau das war am
+            # 25.09.2026 der Fall: Code auf der Platte neuer als die
+            # Produktionsdatenbank. Faellt die Schwelle dann auf 0
+            # zurueck, sperrt der ERSTE Tippfehler eines Kollegen.
+            #
+            # Deshalb gilt die sichere Zahl hier und der Parameter nur
+            # als Abweichung davon.
+            schwelle = SCHWELLE_VORGABE.get(muster, 0)
+            try:
+                gesetzt = self.env["ir.config_parameter"].sudo().get_param(
+                    f"web_rbl.schwelle.{muster}")
+                if gesetzt not in (None, False, ""):
+                    schwelle = int(gesetzt)
+            except (TypeError, ValueError):
+                pass
+            if schwelle > 0:
+                gezaehlt = len(eintrag.treffer_ids.filtered(
+                    lambda t: t.muster == muster))
+                if gezaehlt < schwelle:
+                    eintrag.sudo().write({
+                        "tage_auffaellig": len(
+                            set(eintrag.treffer_ids.mapped("tag"))),
+                    })
+                    return eintrag
+
         if stufe != SPERREN:
             werte = {
                 # Die Tageszahl wird trotzdem nachgefuehrt: Sie ist die
