@@ -295,8 +295,43 @@ class IrHttp(models.AbstractModel):
                 host = (request.httprequest.host or "")[:120]
             except Exception:  # noqa: BLE001
                 host = ""
-            Eintrag.treffer_eigene_transaktion(
-                adresse, path_info, muster, host, stufe)
+            # JE ANFRAGE NUR EINMAL VERBUCHEN.
+            #
+            # ``_match`` wird für DIESELBE Anfrage mehrfach aufgerufen,
+            # sobald sie weiterläuft: Odoos Wegfindung probiert
+            # Sprachpräfixe und Rückfallpfade durch. Bei einem
+            # sperrenden Muster fällt das nicht auf, weil die erste
+            # Abweisung die Anfrage beendet -- bei "zaehlen" und
+            # "melden" aber schon.
+            #
+            # Gemessen am 25.09.2026 nach dem Neustart: EINE Anfrage
+            # auf /impressum.php erzeugte FÜNF Trefferzeilen und
+            # treffer_anzahl 5; eine einzige Anfrage hob einen Eintrag
+            # von 3 auf 8. Die Zähler der Fehlkonfigurations- und
+            # Sammlereinträge waren damit rund fünffach zu hoch.
+            #
+            # Schlimmer als die falsche Zahl ist der Preis: Jede
+            # Verbuchung öffnet eine eigene Datenbankverbindung. Fünf
+            # je Anfrage ist genau die Verstärkung, an der am selben
+            # Morgen schon der Verbindungspool erstickt ist -- und
+            # ausgerechnet bei der Stufe, die billig sein sollte, weil
+            # sie den Verkehr durchlässt.
+            #
+            # Die Markierung liegt in ``environ``: Das ist das
+            # Wörterbuch dieser einen Anfrage, es lebt genau so lange
+            # wie sie, und es ist unabhängig davon, ob Odoo dasselbe
+            # ``request``-Objekt wiederverwendet. Gesetzt wird sie VOR
+            # der Verbuchung -- scheitert die, soll es bei einem
+            # Versuch bleiben und nicht bei fünf.
+            umgebung = getattr(
+                getattr(request, "httprequest", None), "environ", None)
+            schon_gebucht = bool(
+                isinstance(umgebung, dict) and umgebung.get("web_rbl.gebucht"))
+            if not schon_gebucht:
+                if isinstance(umgebung, dict):
+                    umgebung["web_rbl.gebucht"] = True
+                Eintrag.treffer_eigene_transaktion(
+                    adresse, path_info, muster, host, stufe)
             if stufe != SPERREN:
                 # "zaehlen" und "melden" lassen durch. Ein defekter
                 # Sync-Client wird nicht ausgesperrt, sondern gemeldet:
