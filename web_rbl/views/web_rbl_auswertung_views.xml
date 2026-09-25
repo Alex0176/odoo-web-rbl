@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <record id="web_rbl_treffer_graph" model="ir.ui.view">
+        <field name="name">web.rbl.treffer.graph</field>
+        <field name="model">web.rbl.treffer</field>
+        <field name="arch" type="xml">
+            <graph string="Treffer im Zeitverlauf" type="line" sample="1">
+                <field name="tag" interval="day"/>
+                <field name="muster"/>
+            </graph>
+        </field>
+    </record>
+
+    <record id="web_rbl_treffer_pivot" model="ir.ui.view">
+        <field name="name">web.rbl.treffer.pivot</field>
+        <field name="model">web.rbl.treffer</field>
+        <field name="arch" type="xml">
+            <pivot string="Treffer" sample="1">
+                <field name="muster" type="row"/>
+                <field name="tag" interval="day" type="col"/>
+            </pivot>
+        </field>
+    </record>
+
+    <record id="web_rbl_treffer_search" model="ir.ui.view">
+        <field name="name">web.rbl.treffer.search</field>
+        <field name="model">web.rbl.treffer</field>
+        <field name="arch" type="xml">
+            <search>
+                <field name="pfad"/>
+                <field name="muster"/>
+                <field name="host"/>
+                <field name="kennung" string="Kennung"/>
+                <field name="eintrag_id" string="Adresse"/>
+                <filter name="f_heute" string="Heute"
+                        domain="[('tag', '=', context_today().strftime('%Y-%m-%d'))]"/>
+                <filter name="f_woche" string="Letzte 7 Tage"
+                        domain="[('tag', '&gt;=', (context_today() - datetime.timedelta(days=7)).strftime('%Y-%m-%d'))]"/>
+                <separator/>
+                <filter name="f_anmeldung" string="Anmeldeversuche"
+                        domain="[('muster', 'in', ['anmeldung', 'anmeldung_bot', 'csrf', 'anmeldung_verdacht'])]"/>
+                <filter name="f_geheimnisse" string="Suche nach Zugangsdaten"
+                        domain="[('muster', 'in', ['dotenv', 'cloudschluessel', 'konfig', 'vcs', 'bauanweisung'])]"/>
+                <filter name="f_fehlkonfiguration" string="Fehlkonfigurationen"
+                        domain="[('muster', 'in', ['qnap', 'autodiscover', 'activesync', 'webdav', 'synology'])]"/>
+                <group>
+                    <filter name="g_muster" string="Muster"
+                            context="{'group_by': 'muster'}"/>
+                    <filter name="g_tag" string="Tag"
+                            context="{'group_by': 'tag'}"/>
+                    <filter name="g_host" string="Domain"
+                            context="{'group_by': 'host'}"/>
+                    <filter name="g_adresse" string="Adresse"
+                            context="{'group_by': 'eintrag_id'}"/>
+                </group>
+            </search>
+        </field>
+    </record>
+
+    <record id="web_rbl_auswertung_action" model="ir.actions.act_window">
+        <field name="name">Auswertung</field>
+        <field name="res_model">web.rbl.treffer</field>
+        <field name="view_mode">graph,pivot,list</field>
+        <field name="context">{'search_default_f_woche': 1,
+                               'search_default_g_muster': 1}</field>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">Noch keine Treffer.</p>
+            <p>
+                Hier lässt sich ablesen, <b>was tatsächlich hereinkommt</b>:
+                welche Muster wie oft greifen, an welchen Tagen, auf welcher
+                Domain und mit welcher Kennung.
+            </p>
+            <p>
+                Das ist der Blick, den man braucht, bevor man ein Muster
+                scharf schaltet — und der einzige, der zeigt, ob eine Regel
+                trägt oder nur Lärm erzeugt.
+            </p>
+        </field>
+    </record>
+
+    <record id="web_rbl_eintrag_graph" model="ir.ui.view">
+        <field name="name">web.rbl.eintrag.graph</field>
+        <field name="model">web.rbl.eintrag</field>
+        <field name="arch" type="xml">
+            <graph string="Adressen nach Zustand" type="bar" sample="1">
+                <field name="zustand"/>
+            </graph>
+        </field>
+    </record>
+
+    <record id="web_rbl_eintrag_pivot" model="ir.ui.view">
+        <field name="name">web.rbl.eintrag.pivot</field>
+        <field name="model">web.rbl.eintrag</field>
+        <field name="arch" type="xml">
+            <pivot string="Adressen" sample="1">
+                <field name="zustand" type="row"/>
+                <field name="bewertung" type="measure"/>
+                <field name="treffer_anzahl" type="measure"/>
+            </pivot>
+        </field>
+    </record>
+
+</odoo>

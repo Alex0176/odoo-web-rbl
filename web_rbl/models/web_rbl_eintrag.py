@@ -147,14 +147,21 @@ class WebRblEintrag(models.Model):
     # aussagt, nicht ueber den Schaden.
     GEWICHT = {
         "koeder": 60,            # hat eine Faelschung gelesen und gehandelt
-        "traversal_ziel": 35,    # Verzeichniswechsel MIT lohnendem Ziel
+        # Ausfuehrungsversuch: will nicht lesen, sondern TUN.
+        "ausfuehrung": 50,
+        # Webshell-Suche: sucht eine BEREITS INSTALLIERTE Hintertuer.
+        # Wer danach sucht, haelt es fuer moeglich, dass der Server
+        # schon offen ist -- oder er sucht seine eigene von neulich.
+        "traversal_ziel": 40,    # Verzeichniswechsel MIT lohnendem Ziel
         "cloudschluessel": 35,   # Zugangsdaten zu fremden Systemen
         "dotenv": 30,
         "konfig": 30,
         "vcs": 30,
         "bauanweisung": 25,
-        "werkzeugkette": 25,     # /api/fs/exec ist ein Ausfuehrungsversuch
-        "odoo_dbverwalter": 30,  # weiss, dass hier Odoo laeuft
+        "werkzeugkette": 25,
+        # Datenbankverwalter: sucht das Hauptkennwort, also den
+        # Zugang zu ALLEN Datenbanken auf einmal.
+        "odoo_dbverwalter": 40,
         "anmeldung_bot": 40,     # hat die Wartemeldung ignoriert
         # Gelungene Anmeldung von auffaelliger Adresse. Wiegt
         # bewusst NICHT schwer: Der Befund ist wertvoll, aber
@@ -162,8 +169,8 @@ class WebRblEintrag(models.Model):
         # der soll nicht ueber die Bewertung ausgesperrt
         # werden, bevor jemand nachgefragt hat.
         "anmeldung_verdacht": 5,
-        "shell": 30,
-        "dbtool": 20,
+        "shell": 45,
+        "dbtool": 28,   # phpMyAdmin, Adminer: Datenbank von aussen
         "wordpress": 15,
         "php": 12,
         "cgi": 12,

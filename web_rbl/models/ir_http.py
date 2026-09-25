@@ -133,6 +133,10 @@ BEFUND = {
                           "Zugangsdaten sind abhandengekommen. Beim "
                           "Benutzer nachfragen, BEVOR etwas gesperrt "
                           "wird -- eine Sperre traefe sonst ihn.",
+    "ausfuehrung": "Versuch, einen BEFEHL auszufuehren -- kein "
+                   "Lesezugriff. Wer das probiert, will nicht sehen, "
+                   "was da ist, sondern etwas tun. Der schwerste "
+                   "Einzelbefund neben einem Koederanbiss.",
     "fremdliste": "Von einer FREMDEN Bedrohungsliste gemeldet -- "
                   "Tor-Ausgangsknoten, Spamhaus, FireHOL oder "
                   "blocklist.de. Das ist eine Behauptung Dritter ueber "
@@ -343,9 +347,21 @@ MUSTER = (
     #     381 /mcp                          von 60
     #     370 /api/inngest, 369 /inngest
     #     369 /api/fs/exec                  von 54
+    # AUSFUEHRUNG IST ETWAS ANDERES ALS LESEN.
+    #
+    # ``/api/fs/exec`` fragt keine Datei ab, sondern versucht, einen
+    # Befehl auszufuehren. Dasselbe gilt fuer die ueblichen
+    # Schnittstellen zum Anstossen von Auftraegen. Wer das probiert,
+    # will nicht sehen, was da ist -- er will etwas tun.
+    #
+    # Gemessen: 369 Aufrufe von /api/fs/exec von 54 verschiedenen
+    # Adressen in siebzehn Tagen.
+    ("ausfuehrung", SPERREN, re.compile(
+        r"(^|/)(api/fs/(exec|write)|api/exec|api/run|api/eval|"
+        r"api/shell|actuator/env|actuator/gateway)($|/|\?)", re.I)),
     ("werkzeugkette", SPERREN, re.compile(
         r"(^|/)("
-        r"mcp|api/fs/(exec|read|write)|api/inngest|inngest|"
+        r"mcp|api/fs/read|api/inngest|inngest|"
         r"__vite_[a-z_]+|\.vite/|api/designer/v[0-9]+/|"
         r"api/templates/preview"
         r")($|/|\?)", re.I)),
