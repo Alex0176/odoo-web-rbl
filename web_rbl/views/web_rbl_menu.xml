@@ -15,6 +15,9 @@
     <menuitem id="menu_web_rbl_auswertung" name="Auswertung"
               parent="menu_web_rbl_root"
               action="web_rbl_auswertung_action" sequence="5"/>
+    <menuitem id="menu_web_rbl_land" name="Länderregeln"
+              parent="menu_web_rbl_root"
+              action="web_rbl_land_action" sequence="19"/>
     <menuitem id="menu_web_rbl_treffer" name="Treffer"
               parent="menu_web_rbl_root"
               action="web_rbl_treffer_action" sequence="20"/>

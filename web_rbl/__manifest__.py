@@ -37,6 +37,7 @@ Textliste veröffentlicht, wie HAProxy, nftables und ipset sie lesen.
         "views/web_rbl_views.xml",
         "views/web_rbl_freiliste_views.xml",
         "views/web_rbl_quelle_views.xml",
+        "views/web_rbl_land_views.xml",
         "views/web_rbl_auswertung_views.xml",
         "views/web_rbl_menu.xml",
     ],

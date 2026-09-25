@@ -86,6 +86,11 @@ class WebRblEintrag(models.Model):
         help="Wem gehört dieser Anschluss? Wird aus der Freiliste "
              "übernommen, sobald dort ein Kunde hinterlegt ist. Damit "
              "wird aus einem Befund ein Anruf statt einer Adresse.")
+    land_id = fields.Many2one(
+        "res.country", string="Herkunftsland", readonly=True, index=True,
+        help="Zuletzt gesehenes Land. Braucht die GeoLite2-Datenbank; "
+             "ohne sie bleibt das Feld leer und alles andere arbeitet "
+             "unveraendert weiter.")
     hosts = fields.Char(
         string="Betroffene Domains", readonly=True,
         help="Welche unserer Webseiten diese Adresse angesprochen hat.")
@@ -179,6 +184,9 @@ class WebRblEintrag(models.Model):
         "anmeldung": 10,
         "csrf": 10,
         "fremdliste": 10,        # fremdes Urteil, wiegt bewusst leicht
+        # Eine Laenderregel sagt nichts ueber die ABSICHT aus --
+        # sie sagt nur, wo jemand gerade sitzt.
+        "land": 5,
         "traversal": 5,
         "altendung": 3,
         "pflichtseite": 5,
@@ -311,7 +319,7 @@ class WebRblEintrag(models.Model):
     # ------------------------------------------------------------------
     @api.model
     def treffer_eigene_transaktion(self, adresse, pfad, muster, host="",
-                                   stufe=None, kennung=""):
+                                   stufe=None, kennung="", land=""):
         """Treffer in einer EIGENEN Transaktion verbuchen.
 
         WARUM DAS NÖTIG IST
@@ -362,7 +370,8 @@ class WebRblEintrag(models.Model):
                 """, (adresse, SUPERUSER_ID, SUPERUSER_ID))
                 eigene = api.Environment(cr, SUPERUSER_ID, {})
                 eintrag = eigene["web.rbl.eintrag"].treffer_buchen(
-                    adresse, pfad, muster, host, stufe, kennung)
+                    adresse, pfad, muster, host, stufe, kennung,
+                    land)
                 datensatz_id = eintrag.id if eintrag else False
                 cr.commit()
         except Exception:  # noqa: BLE001
@@ -408,7 +417,7 @@ class WebRblEintrag(models.Model):
 
     @api.model
     def treffer_buchen(self, adresse, pfad, muster, host="", stufe=None,
-                       kennung=""):
+                       kennung="", land=""):
         """Einen Sondierungsversuch verbuchen und die Frist fortschreiben.
 
         ``stufe`` ist ``sperren``, ``zaehlen`` oder ``melden`` -- und
@@ -500,6 +509,7 @@ class WebRblEintrag(models.Model):
             "muster": muster or "",
             "host": (host or "")[:120],
             "kennung": (kennung or "")[:255],
+            "land": (land or "")[:4],
             "tag": heute,
         })
 
@@ -519,6 +529,15 @@ class WebRblEintrag(models.Model):
         # Begruendung verlieren. Ohne diese Zeilen stuende in der Liste
         # nur "gesperrt" und ein Pfad -- und in einem halben Jahr
         # wuesste niemand mehr, warum.
+        # Das Land am Eintrag nachfuehren, wenn es neu ist. Eine
+        # Adresse, die ploetzlich aus einem anderen Land kommt, ist
+        # eine Angabe fuer sich.
+        if land and eintrag.land_id.code != land:
+            staat = self.env["res.country"].sudo().search(
+                [("code", "=", land)], limit=1)
+            if staat:
+                eintrag.sudo().write({"land_id": staat.id})
+
         # DEN KUNDEN AUS DER FREILISTE UEBERNEHMEN.
         #
         # Nur, wenn noch keiner steht: Eine Zuordnung von Hand wiegt
@@ -1090,6 +1109,9 @@ class WebRblTreffer(models.Model):
         ondelete="cascade", index=True)
     pfad = fields.Char(string="Pfad", readonly=True)
     muster = fields.Char(string="Erkanntes Muster", readonly=True, index=True)
+    land = fields.Char(
+        string="Land", readonly=True, index=True, size=4,
+        help="Laenderkuerzel zum Zeitpunkt des Treffers.")
     host = fields.Char(
         string="Domain", readonly=True, index=True,
         help="Welche unserer Webseiten angesprochen wurde. Odoo bekommt "

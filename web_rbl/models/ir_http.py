@@ -137,6 +137,12 @@ BEFUND = {
                    "Lesezugriff. Wer das probiert, will nicht sehen, "
                    "was da ist, sondern etwas tun. Der schwerste "
                    "Einzelbefund neben einem Koederanbiss.",
+    "land": "Regel fuer das Herkunftsland. Eine Laenderregel ist eine "
+            "grobe Klinge: Sie trifft alles aus diesem Land, auch "
+            "eigene Leute auf Reisen -- und sie trifft einen Angreifer "
+            "nicht, der sich fuer zwoelf Euro einen Server in Frankfurt "
+            "mietet. Sie gehoert nur dort eingesetzt, wo es einen "
+            "konkreten Anlass gibt.",
     "fremdliste": "Von einer FREMDEN Bedrohungsliste gemeldet -- "
                   "Tor-Ausgangsknoten, Spamhaus, FireHOL oder "
                   "blocklist.de. Das ist eine Behauptung Dritter ueber "
@@ -551,6 +557,35 @@ class IrHttp(models.AbstractModel):
 
         muster, stufe = cls._rbl_muster(path_info, Parameter)
 
+        # LAENDERREGEL -- nur, wenn jemand eine angelegt hat.
+        #
+        # Ohne Eintrag in web.rbl.land passiert hier gar nichts. Die
+        # Sperre nach Land ist eine Option, die niemand
+        # voreingestellt bekommt: Die Angreifer in unserer eigenen
+        # Liste kommen ueberwiegend aus Google-Cloud-Bereichen in
+        # Belgien, Finnland und den Niederlanden -- eine Sperre fuer
+        # alles ausserhalb des deutschsprachigen Raums haette sie
+        # NICHT getroffen, wohl aber eigene Leute im Urlaub.
+        #
+        # Wer sie einschaltet, soll einen konkreten Anlass haben.
+        if not freigestellt:
+            try:
+                land_jetzt = request.geoip.country_code or ""
+            except Exception:  # noqa: BLE001
+                land_jetzt = ""
+            if land_jetzt:
+                landregel = request.env["web.rbl.land"].sudo().stufe_fuer(
+                    land_jetzt)
+                if landregel == "frei":
+                    # Ausnahme in die andere Richtung: Dieses Land wird
+                    # von keiner Laenderregel erfasst.
+                    landregel = ""
+                elif landregel == "kein_backend":
+                    landregel = (SPERREN if cls.BACKENDWEGE.search(
+                        path_info or "") else MELDEN)
+                if landregel and (not muster or landregel == SPERREN):
+                    muster, stufe = "land", landregel
+
         # FREMDE BEDROHUNGSLISTEN -- nachrangig, nie vorrangig.
         #
         # Sie greifen nur, wenn kein eigenes Muster zutrifft. Das ist
@@ -670,6 +705,13 @@ class IrHttp(models.AbstractModel):
                     request.httprequest.headers.get("User-Agent") or "")[:255]
             except Exception:  # noqa: BLE001
                 kennung = ""
+            # Das Herkunftsland, wenn die GeoLite2-Datenbank da ist.
+            # Fehlt sie, gibt Odoo ein leeres Objekt zurueck und
+            # country_code ist None -- kein Fehler, kein Aufwand.
+            try:
+                land = (request.geoip.country_code or "")[:4]
+            except Exception:  # noqa: BLE001
+                land = ""
             # JE ANFRAGE NUR EINMAL VERBUCHEN.
             #
             # ``_match`` wird für DIESELBE Anfrage mehrfach aufgerufen,
@@ -706,7 +748,8 @@ class IrHttp(models.AbstractModel):
                 if isinstance(umgebung, dict):
                     umgebung["web_rbl.gebucht"] = True
                 Eintrag.treffer_eigene_transaktion(
-                    adresse, path_info, muster, host, stufe, kennung)
+                    adresse, path_info, muster, host, stufe, kennung,
+                    land)
             if stufe != SPERREN:
                 # "zaehlen" und "melden" lassen durch. Ein defekter
                 # Sync-Client wird nicht ausgesperrt, sondern gemeldet:

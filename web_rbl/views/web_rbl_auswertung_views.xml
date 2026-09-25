@@ -51,6 +51,8 @@
                             context="{'group_by': 'tag'}"/>
                     <filter name="g_host" string="Domain"
                             context="{'group_by': 'host'}"/>
+                    <filter name="g_land" string="Land"
+                            context="{'group_by': 'land'}"/>
                     <filter name="g_adresse" string="Adresse"
                             context="{'group_by': 'eintrag_id'}"/>
                 </group>

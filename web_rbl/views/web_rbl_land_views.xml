@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <record id="web_rbl_land_list" model="ir.ui.view">
+        <field name="name">web.rbl.land.list</field>
+        <field name="model">web.rbl.land</field>
+        <field name="arch" type="xml">
+            <list editable="bottom" decoration-muted="not aktiv"
+                  decoration-danger="stufe == 'sperren'"
+                  decoration-success="stufe == 'frei'">
+                <field name="country_id"/>
+                <field name="code"/>
+                <field name="stufe"/>
+                <field name="bemerkung" placeholder="Warum gibt es diese Regel?"/>
+                <field name="aktiv" widget="boolean_toggle"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="web_rbl_land_action" model="ir.actions.act_window">
+        <field name="name">Länderregeln</field>
+        <field name="res_model">web.rbl.land</field>
+        <field name="view_mode">list</field>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">
+                Keine Länderregel — und das ist die richtige Voreinstellung.
+            </p>
+            <p>
+                Solange hier nichts steht, spielt das Herkunftsland für
+                Sperren <b>keine Rolle</b>. Es wird nur <b>angezeigt</b>,
+                und dafür ist es gut: Eine Adresse ist eine Zahlenfolge,
+                mit dem Land daneben ist sie ein Befund.
+            </p>
+            <p>
+                <b>Zum Aussperren taugt es wenig.</b> Angreifer mieten
+                sich für zwölf Euro im Monat einen Server im Inland. Eine
+                Länderregel trifft dafür zuverlässig eigene Mitarbeiter
+                im Urlaub und Kunden auf Geschäftsreise. Legen Sie eine
+                an, wenn Sie einen konkreten Anlass haben — nicht auf
+                Verdacht.
+            </p>
+            <p>
+                Braucht die GeoLite2-Datenbank unter
+                <code>/usr/share/GeoIP/GeoLite2-Country.mmdb</code>.
+                Fehlt sie, bleibt das Landfeld leer und alles andere
+                arbeitet unverändert weiter.
+            </p>
+        </field>
+    </record>
+
+</odoo>
