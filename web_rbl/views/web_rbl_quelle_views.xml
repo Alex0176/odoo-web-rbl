@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <record id="web_rbl_quelle_list" model="ir.ui.view">
+        <field name="name">web.rbl.quelle.list</field>
+        <field name="model">web.rbl.quelle</field>
+        <field name="arch" type="xml">
+            <list decoration-muted="not aktiv" decoration-danger="letzter_fehler">
+                <field name="sequence" widget="handle"/>
+                <field name="name"/>
+                <field name="stufe"/>
+                <field name="anzahl" sum="Bereiche gesamt"/>
+                <field name="letzter_abgleich"/>
+                <field name="letzter_fehler" optional="show"/>
+                <field name="aktiv" widget="boolean_toggle"/>
+                <button name="action_abgleichen" type="object"
+                        string="Jetzt abgleichen" icon="fa-refresh"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="web_rbl_quelle_form" model="ir.ui.view">
+        <field name="name">web.rbl.quelle.form</field>
+        <field name="model">web.rbl.quelle</field>
+        <field name="arch" type="xml">
+            <form>
+                <header>
+                    <button name="action_abgleichen" type="object"
+                            string="Jetzt abgleichen" class="btn-primary"
+                            icon="fa-refresh"/>
+                </header>
+                <sheet>
+                    <div class="oe_title"><h1><field name="name"/></h1></div>
+                    <div class="alert alert-warning" role="alert"
+                         invisible="stufe != 'sperren'">
+                        Diese Quelle <b>sperrt</b>. Damit übernehmen Sie das
+                        Urteil eines Dritten über Adressen, deren Verkehr Sie
+                        nie gesehen haben. Die Freiliste geht trotzdem vor.
+                    </div>
+                    <group>
+                        <group>
+                            <field name="url" widget="url"/>
+                            <field name="stufe"/>
+                            <field name="sequence"/>
+                            <field name="aktiv"/>
+                        </group>
+                        <group>
+                            <field name="anzahl"/>
+                            <field name="letzter_abgleich"/>
+                            <field name="letzter_fehler"/>
+                        </group>
+                    </group>
+                    <group string="Beschreibung">
+                        <field name="beschreibung" nolabel="1"/>
+                    </group>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <record id="web_rbl_quelle_action" model="ir.actions.act_window">
+        <field name="name">Bedrohungslisten</field>
+        <field name="res_model">web.rbl.quelle</field>
+        <field name="view_mode">list,form</field>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">Keine fremde Liste eingetragen.</p>
+            <p>
+                Fremde Bedrohungslisten sind <b>Behauptungen Dritter</b> über
+                Verkehr, den Sie nie gesehen haben — kein eigener Befund.
+                Deshalb greifen sie nur, wenn kein eigenes Muster zutrifft,
+                und deshalb ist die Vorgabe <b>melden</b>.
+            </p>
+        </field>
+    </record>
+
+    <record id="web_rbl_fremdliste_list" model="ir.ui.view">
+        <field name="name">web.rbl.fremdliste.list</field>
+        <field name="model">web.rbl.fremdliste</field>
+        <field name="arch" type="xml">
+            <list create="false">
+                <field name="bereich"/>
+                <field name="quelle_id"/>
+                <field name="stufe"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="web_rbl_fremdliste_action" model="ir.actions.act_window">
+        <field name="name">Bereiche fremder Listen</field>
+        <field name="res_model">web.rbl.fremdliste</field>
+        <field name="view_mode">list</field>
+    </record>
+
+</odoo>

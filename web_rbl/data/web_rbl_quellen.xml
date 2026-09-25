@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data noupdate="1">
+        <!--
+            Vier frei zugaengliche Quellen, alle ohne Anmeldung.
+            ALLE auf "melden" ausgeliefert: Wer eine fremde Liste
+            scharf schaltet, uebernimmt fremdes Urteil. Erst ansehen,
+            wen sie bei einem selbst treffen wuerde, dann entscheiden.
+        -->
+        <record id="quelle_tor" model="web.rbl.quelle">
+            <field name="name">Tor-Ausgangsknoten</field>
+            <field name="sequence">10</field>
+            <field name="url">https://check.torproject.org/torbulkexitlist</field>
+            <field name="stufe">melden</field>
+            <field name="beschreibung">Die offizielle Liste der Tor-Ausgangsknoten. Wer darueber kommt,
+verbirgt seine Herkunft. Das ist weder verboten noch ungewoehnlich,
+aber es ist eine Angabe, die man haben will: Ein Anmeldeversuch aus
+dem Tor-Netz wiegt schwerer als einer von einem Kundenanschluss.</field>
+        </record>
+
+        <record id="quelle_spamhaus" model="web.rbl.quelle">
+            <field name="name">Spamhaus DROP</field>
+            <field name="sequence">20</field>
+            <field name="url">https://www.spamhaus.org/drop/drop.txt</field>
+            <field name="stufe">melden</field>
+            <field name="beschreibung">Netze, die nach Einschaetzung von Spamhaus vollstaendig unter der
+Kontrolle von Kriminellen stehen. Die engste und verlaesslichste der
+vier Quellen -- wer sie sperren laesst, geht das kleinste Risiko ein.</field>
+        </record>
+
+        <record id="quelle_firehol" model="web.rbl.quelle">
+            <field name="name">FireHOL Level 1</field>
+            <field name="sequence">30</field>
+            <field name="url">https://raw.githubusercontent.com/firehol/blocklist-ipsets/master/firehol_level1.netset</field>
+            <field name="stufe">melden</field>
+            <field name="beschreibung">Zusammenfuehrung mehrerer Quellen, bewusst konservativ gehalten.
+Enthaelt auch reservierte und nicht vergebene Bereiche; die werden
+beim Einlesen verworfen, weil sie in einer Sperrliste fuer
+Webverkehr nichts verloren haben.</field>
+        </record>
+
+        <record id="quelle_blocklistde" model="web.rbl.quelle">
+            <field name="name">blocklist.de</field>
+            <field name="sequence">40</field>
+            <field name="url">https://lists.blocklist.de/lists/all.txt</field>
+            <field name="stufe">melden</field>
+            <field name="beschreibung">Gemeldete Angreifer, ueberwiegend SSH und Mail. Die breiteste der
+vier Quellen und damit die mit dem hoechsten Fehlalarmrisiko fuer
+Webverkehr: Eine Adresse, die anderswo SSH durchprobiert hat, sagt
+ueber einen Webserver wenig. Bewusst als Letzte einsortiert.</field>
+        </record>
+
+        <record id="cron_fremdquellen" model="ir.cron">
+            <field name="name">Web RBL: fremde Bedrohungslisten abgleichen</field>
+            <field name="model_id" ref="model_web_rbl_quelle"/>
+            <field name="state">code</field>
+            <field name="code">model._cron_quellen_abgleichen()</field>
+            <field name="interval_number">1</field>
+            <field name="interval_type">days</field>
+            <field name="active" eval="True"/>
+        </record>
+    </data>
+</odoo>

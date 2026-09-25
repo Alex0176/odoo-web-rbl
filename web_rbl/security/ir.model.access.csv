@@ -3,3 +3,5 @@ access_web_rbl_eintrag_manager,web.rbl.eintrag.manager,model_web_rbl_eintrag,web
 access_web_rbl_treffer_manager,web.rbl.treffer.manager,model_web_rbl_treffer,web_rbl.group_web_rbl_manager,1,0,0,1
 access_web_rbl_koeder_manager,web.rbl.koeder.manager,model_web_rbl_koeder,web_rbl.group_web_rbl_manager,1,0,0,1
 access_web_rbl_freiliste_manager,web.rbl.freiliste.manager,model_web_rbl_freiliste,web_rbl.group_web_rbl_manager,1,1,1,1
+access_web_rbl_quelle_manager,web.rbl.quelle.manager,model_web_rbl_quelle,web_rbl.group_web_rbl_manager,1,1,1,1
+access_web_rbl_fremdliste_manager,web.rbl.fremdliste.manager,model_web_rbl_fremdliste,web_rbl.group_web_rbl_manager,1,1,1,1

@@ -124,6 +124,11 @@ BEFUND = {
                "keine erfolgreichen Seitenaufrufe. So werden auch "
                "Sondierungen gefunden, fuer die es kein Muster gibt -- "
                "und das sind die meisten.",
+    "fremdliste": "Von einer FREMDEN Bedrohungsliste gemeldet -- "
+                  "Tor-Ausgangsknoten, Spamhaus, FireHOL oder "
+                  "blocklist.de. Das ist eine Behauptung Dritter ueber "
+                  "Verkehr, den wir nie gesehen haben, kein eigener "
+                  "Befund. Welche Quelle es ist, steht bei der Adresse.",
     "freiliste": "Diese Adresse steht auf der Freiliste und wird "
                  "deshalb nie gesperrt -- gemeldet schon. Nachsehen, "
                  "ob dort etwas klemmt oder ob der Freilisteneintrag "
@@ -505,6 +510,24 @@ class IrHttp(models.AbstractModel):
             return cls._rbl_abweisen(Parameter)
 
         muster, stufe = cls._rbl_muster(path_info, Parameter)
+
+        # FREMDE BEDROHUNGSLISTEN -- nachrangig, nie vorrangig.
+        #
+        # Sie greifen nur, wenn kein eigenes Muster zutrifft. Das ist
+        # Absicht: Ein eigener Befund ("diese Adresse hat bei uns
+        # /.env gesucht") ist ein Beleg, eine fremde Liste ist eine
+        # Behauptung ueber Verkehr, den wir nie gesehen haben. Wo wir
+        # selbst etwas beobachtet haben, zaehlt das.
+        #
+        # Die Vorgabe jeder Quelle ist "melden". Wer eine fremde Liste
+        # scharf schaltet, uebernimmt fremdes Urteil -- das soll eine
+        # Entscheidung sein und keine Voreinstellung.
+        if not muster:
+            fremd = request.env["web.rbl.fremdliste"].sudo().stufe_fuer(
+                adresse)
+            if fremd:
+                muster, stufe = "fremdliste", fremd
+
         if freigestellt and stufe == SPERREN:
             # Erfassen ja, sperren nein. Der Treffer steht damit als
             # Befund in der Liste, und jemand kann beim Kunden
