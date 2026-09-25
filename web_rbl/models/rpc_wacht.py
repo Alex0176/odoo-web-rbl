@@ -74,7 +74,53 @@ ANMELDEMETHODEN = {("common", "authenticate"), ("common", "login")}
 _MERKMAL = "_web_rbl_umhuellt"
 
 
-def _verbuchen(params, pfad):
+def _angaben(service_name, params):
+    """(Datenbank, Benutzervermerk) je Dienst -- NIE aus blindem Index.
+
+    HIER LIEGT EINE FALLE, UND SIE IST SCHARF
+    ------------------------------------------
+    Die Parameterliste bedeutet bei jedem Dienst etwas anderes, und
+    beim Datenbankverwalter steht an vorderster Stelle das
+    HAUPTKENNWORT::
+
+        dispatch_rpc('db', 'drop', [master_pwd, name])
+        dispatch_rpc('db', 'change_admin_password', ["admin", master_pwd])
+
+    Wer hier ``params[1]`` als Benutzernamen verbucht, schreibt das
+    Hauptkennwort im Klartext in die Sperrliste -- und von dort in
+    jede Sicherung. Genau das wäre beim ersten Entwurf passiert.
+
+    Deshalb wird je Dienst ausdrücklich entschieden, was gelesen
+    werden darf, statt sich auf eine Position zu verlassen. Für den
+    Datenbankverwalter wird aus den Parametern GAR NICHTS gelesen.
+    """
+    if service_name == "db":
+        # Aus params nichts. Die Datenbank kommt aus der Anfrage oder
+        # der Konfiguration, der Vermerk ist ein fester Text.
+        datenbank = ""
+        try:
+            datenbank = request.db or ""
+        except Exception:  # noqa: BLE001
+            datenbank = ""
+        if not datenbank:
+            konfiguriert = odoo.tools.config.get("db_name") or ""
+            if isinstance(konfiguriert, (list, tuple)):
+                konfiguriert = konfiguriert[0] if konfiguriert else ""
+            datenbank = str(konfiguriert).split(",")[0].strip()
+        return datenbank, "(Hauptkennwort des Datenbankverwalters)"
+
+    # common/authenticate: (db, login, password, env)
+    # object/execute_kw:   (db, uid, password, modell, methode, ...)
+    # In beiden Faellen ist [2] das Geheimnis -- es wird nie gelesen.
+    try:
+        datenbank = str(params[0]) if params else ""
+        benutzer = str(params[1])[:80] if len(params) > 1 else ""
+    except Exception:  # noqa: BLE001
+        return "", ""
+    return datenbank, benutzer
+
+
+def _verbuchen(service_name, params, pfad):
     """Den Fehlversuch in einer eigenen Umgebung festhalten.
 
     ``dispatch_rpc`` hat keine Umgebung -- es bekommt nur den
@@ -84,11 +130,7 @@ def _verbuchen(params, pfad):
     """
     if not request:
         return
-    try:
-        datenbank = params[0]
-        benutzer = str(params[1])[:80] if len(params) > 1 else ""
-    except Exception:  # noqa: BLE001
-        return
+    datenbank, benutzer = _angaben(service_name, params)
     if not datenbank:
         return
 
@@ -146,10 +188,21 @@ def _umhuellen():
         try:
             ergebnis = original(service_name, method, params)
         except AccessDenied:
-            # Der andere Weg, auf dem eine Anmeldung scheitern kann --
-            # etwa beim Objektdienst mit falschem Schluessel.
+            # Der andere Weg, auf dem eine Anmeldung scheitern kann.
+            #
+            # ``object`` ist der Objektdienst -- dort scheitert ein
+            # falscher Schluessel oder ein falsches Kennwort mit einer
+            # Ausnahme statt mit False.
+            #
+            # ``db`` ist der Datenbankverwalter. Jeder Aufruf dort
+            # prueft zuerst das HAUPTKENNWORT; ein Fehlschlag ist der
+            # Versuch, an die Datenbanken selbst zu kommen. Das ist
+            # der schwerwiegendste Anmeldeversuch, den es hier gibt --
+            # und er laeuft ueber denselben Weg wie alles andere,
+            # seit die Umhuellung auch in
+            # ``web.controllers.database`` greift.
             if (service_name, method) in ANMELDEMETHODEN or \
-                    service_name == "object":
+                    service_name in ("object", "db"):
                 _sicher_verbuchen(params, service_name, method)
             raise
         if (service_name, method) in ANMELDEMETHODEN and not ergebnis:
@@ -161,7 +214,49 @@ def _umhuellen():
 
     setattr(dispatch_rpc, _MERKMAL, True)
     odoo.http.dispatch_rpc = dispatch_rpc
-    _logger.info("Web RBL: RPC-Anmeldungen werden ueberwacht.")
+
+    # ES GENUEGT NICHT, ``odoo.http.dispatch_rpc`` ZU ERSETZEN.
+    #
+    # Die Controller holen die Funktion mit
+    # ``from odoo.http import dispatch_rpc`` -- damit ist der NAME in
+    # ihrem Modul beim Import an die Originalfunktion gebunden. Ein
+    # spaeterer Austausch des Attributs in ``odoo.http`` erreicht ihn
+    # nicht mehr.
+    #
+    # Und genau so ist es gekommen: Am 25.09.2026 lud die Umhuellung
+    # sauber ("RPC-Anmeldungen werden ueberwacht"), griff aber nie.
+    # Das Modul ``rpc`` laedt vor uns (base -> web -> rpc -> web_rbl),
+    # also stand der Name dort laengst.
+    #
+    # Deshalb zusaetzlich die bereits geladenen Module durchgehen.
+    # Gesucht wird nicht nach Namen, sondern nach der IDENTITAET der
+    # Funktion: Wer dieselbe Funktion gebunden hat, bekommt die
+    # Umhuellung. Das trifft ``rpc.controllers.xmlrpc`` und
+    # ``.jsonrpc`` ebenso wie jedes Fremdmodul, das denselben Weg
+    # geht -- ohne dass wir eines davon voraussetzen muessten.
+    #
+    # Laedt ein Modul spaeter, bindet es ohnehin schon die Umhuellung.
+    # Beide Richtungen sind damit abgedeckt.
+    import sys
+    umgebogen = []
+    for name, modul in list(sys.modules.items()):
+        if modul is None or name == "odoo.http":
+            continue
+        try:
+            if getattr(modul, "dispatch_rpc", None) is original:
+                modul.dispatch_rpc = dispatch_rpc
+                umgebogen.append(name)
+        except Exception:  # noqa: BLE001
+            # Manche Module wehren sich gegen getattr oder setattr.
+            # Das ist kein Grund, den Rest nicht zu erledigen.
+            continue
+
+    _logger.info(
+        "Web RBL: RPC-Anmeldungen werden ueberwacht%s.",
+        f" ({', '.join(umgebogen)})" if umgebogen
+        else " -- ACHTUNG: kein Controller gefunden, der dispatch_rpc "
+             "gebunden hat; bei installiertem Modul 'rpc' ist das ein "
+             "Hinweis auf eine geaenderte Ladereihenfolge")
 
 
 def _sicher_verbuchen(params, service_name, method):
@@ -178,7 +273,8 @@ def _sicher_verbuchen(params, service_name, method):
             pfad = request.httprequest.path or ""
         except Exception:  # noqa: BLE001
             pfad = f"/{service_name}/{method}"
-        _verbuchen(params, pfad or f"/{service_name}/{method}")
+        _verbuchen(service_name, params,
+                   pfad or f"/{service_name}/{method}")
     except Exception:  # noqa: BLE001
         _logger.exception(
             "Web RBL: RPC-Fehlversuch konnte nicht verbucht werden.")
