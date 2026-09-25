@@ -44,6 +44,14 @@ TAGE_BIS_DAUERHAFT = 3
 # Eine Sperre beim ersten Fehlversuch trifft also Kunden bei der
 # Einrichtung, nicht Angreifer. Die Zahl 10 ist bewusst dieselbe wie
 # Odoos ``base.login_cooldown_after``.
+# Muster, die eine echte FEHLKONFIGURATION bezeichnen: defekte
+# Software, die den Webserver fuer etwas anderes haelt. Nur diese
+# gehoeren in die Arbeitsliste zum Anrufen -- alles andere, was
+# gemeldet statt gesperrt wird, bleibt schlicht "beobachtet".
+FEHLKONFIGURATION = {
+    "qnap", "autodiscover", "activesync", "webdav", "synology",
+}
+
 SCHWELLE_VORGABE = {
     "anmeldung": 10,
     "csrf": 10,
@@ -148,6 +156,12 @@ class WebRblEintrag(models.Model):
         "werkzeugkette": 25,     # /api/fs/exec ist ein Ausfuehrungsversuch
         "odoo_dbverwalter": 30,  # weiss, dass hier Odoo laeuft
         "anmeldung_bot": 40,     # hat die Wartemeldung ignoriert
+        # Gelungene Anmeldung von auffaelliger Adresse. Wiegt
+        # bewusst NICHT schwer: Der Befund ist wertvoll, aber
+        # er kann den berechtigten Benutzer betreffen -- und
+        # der soll nicht ueber die Bewertung ausgesperrt
+        # werden, bevor jemand nachgefragt hat.
+        "anmeldung_verdacht": 5,
         "shell": 30,
         "dbtool": 20,
         "wordpress": 15,
@@ -593,12 +607,31 @@ class WebRblEintrag(models.Model):
             }
             if stufe == MELDEN:
                 if eintrag.zustand == "beobachtet":
-                    # Ein Sammler ist keine Fehlkonfiguration. Beides
-                    # wird gemeldet statt gesperrt, aber das eine ruft
-                    # man beim Kunden an, das andere sieht man sich an.
-                    werte["zustand"] = (
-                        "sammler" if muster == "pflichtseite"
-                        else "fehlkonfiguration")
+                    # NICHT jede Meldung ist eine Fehlkonfiguration.
+                    #
+                    # "melden" heisst nur "verbuchen statt sperren".
+                    # Das trifft drei ganz verschiedene Faelle:
+                    #
+                    # * Defekte Software, die uns verwechselt -- ein
+                    #   Qsync-Client, ein Outlook. DAS ist eine
+                    #   Fehlkonfiguration, und sie gehoert auf eine
+                    #   Arbeitsliste zum Anrufen.
+                    # * Ein Sammler, der Pflichtangaben abgrast.
+                    # * Alles andere: ein erkannter Scanner, den wir
+                    #   noch beobachten, eine fremde Bedrohungsliste,
+                    #   ein Verdacht auf abhandengekommene
+                    #   Zugangsdaten, oder ein sperrendes Muster, das
+                    #   nur wegen der Freiliste herabgestuft wurde.
+                    #
+                    # Der dritte Fall als "Fehlkonfiguration" zu
+                    # fuehren waere sinnentstellend -- und er zieht
+                    # ueber die Bewertung eine falsche Zahl nach sich,
+                    # weil eine Fehlkonfiguration bewusst 0 bekommt.
+                    if muster in FEHLKONFIGURATION:
+                        werte["zustand"] = "fehlkonfiguration"
+                    elif muster == "pflichtseite":
+                        werte["zustand"] = "sammler"
+                    # sonst: bleibt "beobachtet"
             eintrag.sudo().write(werte)
             return eintrag
 

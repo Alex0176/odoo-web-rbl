@@ -124,6 +124,15 @@ BEFUND = {
                "keine erfolgreichen Seitenaufrufe. So werden auch "
                "Sondierungen gefunden, fuer die es kein Muster gibt -- "
                "und das sind die meisten.",
+    "anmeldung_verdacht": "GELUNGENE Anmeldung von einer auffaelligen "
+                          "Adresse. Das ist der schwerste Befund des "
+                          "Moduls: Ein Fehlversuch sagt, dass jemand "
+                          "raten wollte -- ein Erfolg sagt, dass jemand "
+                          "nicht mehr raten muss. Entweder war der "
+                          "berechtigte Benutzer unterwegs, oder die "
+                          "Zugangsdaten sind abhandengekommen. Beim "
+                          "Benutzer nachfragen, BEVOR etwas gesperrt "
+                          "wird -- eine Sperre traefe sonst ihn.",
     "fremdliste": "Von einer FREMDEN Bedrohungsliste gemeldet -- "
                   "Tor-Ausgangsknoten, Spamhaus, FireHOL oder "
                   "blocklist.de. Das ist eine Behauptung Dritter ueber "

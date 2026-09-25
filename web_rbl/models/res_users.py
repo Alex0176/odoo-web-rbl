@@ -83,7 +83,7 @@ class ResUsers(models.Model):
                 "Web RBL: Anmeldepruefung gescheitert, Anmeldung laeuft "
                 "unveraendert weiter.")
         try:
-            return super()._login(credential, user_agent_env)
+            ergebnis = super()._login(credential, user_agent_env)
         except AccessDenied:
             # Die eigentliche Arbeit ist gekapselt und faengt alles ab:
             # Eine gescheiterte Anmeldung muss als gescheiterte
@@ -96,6 +96,144 @@ class ResUsers(models.Model):
                 _logger.exception(
                     "Web RBL: Fehlversuch konnte nicht verbucht werden.")
             raise
+
+        # HIER IST DIE ANMELDUNG GELUNGEN.
+        #
+        # Und genau das macht diesen Fall zum wertvollsten des ganzen
+        # Moduls: Eine GESCHEITERTE Anmeldung von einer auffaelligen
+        # Adresse ist Laerm -- jemand probiert, wie tausend andere
+        # auch. Eine GELUNGENE von derselben Adresse heisst, dass
+        # jemand das Kennwort HAT.
+        #
+        # Dafuer gibt es genau zwei Erklaerungen: Der berechtigte
+        # Benutzer sitzt gerade hinter einer auffaelligen Adresse --
+        # Hotel-WLAN, Tor, ein Anschluss, den vorher jemand anderes
+        # hatte --, oder die Zugangsdaten sind abhandengekommen.
+        #
+        # Beides will man wissen, und beides will man von einem
+        # Menschen beurteilt haben. Deshalb wird gemeldet und NICHT
+        # gesperrt: Wer hier automatisch aussperrt, sperrt irgendwann
+        # den Geschaeftsfuehrer aus einem Hotel aus.
+        try:
+            self._rbl_gelungene_anmeldung_pruefen(credential, ergebnis)
+        except Exception:  # noqa: BLE001
+            _logger.exception(
+                "Web RBL: Pruefung der gelungenen Anmeldung gescheitert.")
+        return ergebnis
+
+    def _rbl_gelungene_anmeldung_pruefen(self, credential, auth_info):
+        """Eine gelungene Anmeldung von einer auffälligen Adresse.
+
+        Gemeldet wird nur, wenn die Zugangsdaten GÜLTIG waren. Der
+        Unterschied ist der ganze Befund: Ein Fehlversuch sagt, dass
+        jemand raten wollte. Ein Erfolg sagt, dass jemand nicht mehr
+        raten muss.
+        """
+        if not request:
+            return
+        Parameter = self.env["ir.config_parameter"].sudo()
+        if Parameter.get_param("web_rbl.aktiv", "1") != "1":
+            return
+        if Parameter.get_param("web_rbl.verdacht_aktiv", "1") != "1":
+            return
+
+        Herkunft = self.env["web.rbl.herkunft"].sudo()
+        adresse = Herkunft.adresse()
+        if not adresse or not Herkunft.sperrbar(adresse):
+            return
+        if self.env["web.rbl.freiliste"].sudo().ist_frei(adresse):
+            return
+
+        # Woran erkennen wir "auffaellig"? An allem, was wir haben.
+        gruende = []
+        fremd = self.env["web.rbl.fremdliste"].sudo()
+        stufe = fremd.stufe_fuer(adresse)
+        if stufe:
+            quellen = ", ".join(
+                fremd.quellen_zu(adresse).mapped("quelle_id.name")) or "unbekannt"
+            gruende.append(f"steht auf fremder Bedrohungsliste ({quellen})")
+
+        Eintrag = self.env["web.rbl.eintrag"].sudo()
+        eintrag = Eintrag.search([("adresse", "=", adresse)], limit=1)
+        if eintrag and eintrag.zustand != "frei":
+            try:
+                schwelle = int(Parameter.get_param(
+                    "web_rbl.verdacht_ab_bewertung", "10"))
+            except (TypeError, ValueError):
+                schwelle = 10
+            if schwelle and (eintrag.bewertung or 0) >= schwelle:
+                gruende.append(
+                    f"eigene Bewertung {eintrag.bewertung} "
+                    f"({eintrag.bewertung_grund or ''})")
+        if not gruende:
+            return
+
+        benutzer = ""
+        try:
+            benutzer = str(credential.get("login") or "")[:80]
+        except Exception:  # noqa: BLE001
+            benutzer = ""
+        # Das Kennwort wird nirgends beruehrt -- weder gelesen noch
+        # vermerkt. Der Befund ist, DASS es gestimmt hat.
+        _logger.warning(
+            "Web RBL: GELUNGENE Anmeldung von auffaelliger Adresse %s "
+            "als '%s' -- %s. Zugangsdaten moeglicherweise abhandengekommen.",
+            adresse, benutzer or "?", "; ".join(gruende))
+        self._rbl_verdacht_melden(adresse, benutzer, gruende, auth_info)
+
+    def _rbl_verdacht_melden(self, adresse, benutzer, gruende, auth_info):
+        """Den Verdacht festhalten -- intern, nie beim Kunden."""
+        Parameter = self.env["ir.config_parameter"].sudo()
+        Eintrag = self.env["web.rbl.eintrag"].sudo()
+        try:
+            pfad = request.httprequest.path or ""
+            host = (request.httprequest.host or "")[:120]
+            kennung = (request.httprequest.headers.get("User-Agent")
+                       or "")[:255]
+        except Exception:  # noqa: BLE001
+            pfad, host, kennung = "", "", ""
+
+        # Als Meldung verbuchen, nie als Sperre: Solange nicht geklaert
+        # ist, ob der berechtigte Benutzer nur unterwegs war, waere
+        # eine Sperre die falsche Antwort -- sie traefe ihn.
+        Eintrag.treffer_eigene_transaktion(
+            adresse, f"{pfad} (gelungene Anmeldung als {benutzer})"[:255],
+            "anmeldung_verdacht", host, "melden", kennung)
+
+        # Eine interne Aufgabe fuer die, die es beurteilen koennen.
+        empfaenger = (Parameter.get_param("web_rbl.verdacht_melden_an")
+                      or "").strip()
+        if not empfaenger:
+            return
+        try:
+            kennungen = [int(t) for t in empfaenger.replace(",", " ").split()]
+        except (TypeError, ValueError):
+            return
+        benutzer_satz = self.env["res.users"].sudo().browse(kennungen).exists()
+        if not benutzer_satz:
+            return
+        eintrag = Eintrag.search([("adresse", "=", adresse)], limit=1)
+        if not eintrag:
+            return
+        modell = self.env["ir.model"]._get_id("web.rbl.eintrag")
+        for empf in benutzer_satz:
+            self.env["mail.activity"].sudo().create({
+                "res_model_id": modell,
+                "res_id": eintrag.id,
+                "activity_type_id": self.env.ref(
+                    "mail.mail_activity_data_todo").id,
+                "summary": f"Verdacht: Anmeldung als {benutzer} von {adresse}",
+                "note": (
+                    f"<p>Von dieser Adresse hat sich jemand <b>erfolgreich</b> "
+                    f"als <b>{benutzer}</b> angemeldet.</p>"
+                    f"<p>Die Adresse ist auffällig: {'; '.join(gruende)}</p>"
+                    f"<p>Entweder war der berechtigte Benutzer unterwegs "
+                    f"(Hotel, Tor, wechselnder Anschluss) &mdash; oder die "
+                    f"Zugangsdaten sind abhandengekommen. Bitte beim "
+                    f"Benutzer nachfragen, bevor etwas gesperrt wird.</p>"
+                    f"<p><i>Das Kennwort wurde nirgends vermerkt.</i></p>"),
+                "user_id": empf.id,
+            })
 
     def _rbl_anmeldung_erlaubt(self):
         """Darf sich von dieser Adresse ueberhaupt jemand anmelden?"""

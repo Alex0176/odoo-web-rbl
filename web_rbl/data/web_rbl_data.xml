@@ -79,6 +79,28 @@
             Bueroadresse kann neben zwanzig Mitarbeitern ein
             befallener Rechner sitzen.
         -->
+        <!--
+            Gelungene Anmeldung von einer auffaelligen Adresse.
+            Gemeldet wird nur, wenn die Zugangsdaten GUELTIG waren —
+            ein Fehlversuch ist Laerm, ein Erfolg ist ein Befund.
+
+            Die Schwelle ist bewusst NIEDRIG (10): Anders als bei der
+            Anmeldesperre wird hier nichts verhindert, nur vermerkt.
+            Ein Fehlalarm kostet einen Blick, ein uebersehener Fall
+            kostet ein Konto.
+
+            web_rbl.verdacht_melden_an: Kennungen von Benutzern, die
+            eine Aufgabe dazu bekommen sollen, durch Leerzeichen
+            getrennt. Leer = nur ins Protokoll.
+        -->
+        <record id="param_verdacht_aktiv" model="ir.config_parameter">
+            <field name="key">web_rbl.verdacht_aktiv</field>
+            <field name="value">1</field>
+        </record>
+        <record id="param_verdacht_ab_bewertung" model="ir.config_parameter">
+            <field name="key">web_rbl.verdacht_ab_bewertung</field>
+            <field name="value">10</field>
+        </record>
         <record id="param_anmeldung_ab_bewertung" model="ir.config_parameter">
             <field name="key">web_rbl.anmeldung_ab_bewertung</field>
             <field name="value">40</field>
