@@ -6,6 +6,9 @@
     <menuitem id="menu_web_rbl_eintrag" name="Sperrliste"
               parent="menu_web_rbl_root"
               action="web_rbl_eintrag_action" sequence="10"/>
+    <menuitem id="menu_web_rbl_freiliste" name="Freiliste"
+              parent="menu_web_rbl_root"
+              action="web_rbl_freiliste_action" sequence="15"/>
     <menuitem id="menu_web_rbl_treffer" name="Treffer"
               parent="menu_web_rbl_root"
               action="web_rbl_treffer_action" sequence="20"/>

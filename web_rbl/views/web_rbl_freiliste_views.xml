@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <record id="web_rbl_freiliste_list" model="ir.ui.view">
+        <field name="name">web.rbl.freiliste.list</field>
+        <field name="model">web.rbl.freiliste</field>
+        <field name="arch" type="xml">
+            <list editable="bottom" decoration-muted="not aktiv">
+                <field name="bereich" placeholder="81.223.169.254 oder 10.10.0.0/16"/>
+                <field name="quelle"/>
+                <field name="partner_id"/>
+                <field name="bemerkung" placeholder="Wem gehört das, und warum steht es hier?"/>
+                <field name="aktiv" widget="boolean_toggle"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="web_rbl_freiliste_search" model="ir.ui.view">
+        <field name="name">web.rbl.freiliste.search</field>
+        <field name="model">web.rbl.freiliste</field>
+        <field name="arch" type="xml">
+            <search>
+                <field name="bereich"/>
+                <field name="bemerkung"/>
+                <field name="partner_id"/>
+                <filter name="f_aktiv" string="Aktiv"
+                        domain="[('aktiv', '=', True)]"/>
+                <filter name="f_vpn" string="VPN-Gegenstellen"
+                        domain="[('quelle', '=', 'vpn')]"/>
+                <group>
+                    <filter name="g_quelle" string="Herkunft"
+                            context="{'group_by': 'quelle'}"/>
+                </group>
+            </search>
+        </field>
+    </record>
+
+    <record id="web_rbl_freiliste_action" model="ir.actions.act_window">
+        <field name="name">Freiliste</field>
+        <field name="res_model">web.rbl.freiliste</field>
+        <field name="view_mode">list</field>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">
+                Noch keine Adresse auf der Freiliste.
+            </p>
+            <p>
+                Wer hier steht, wird <b>nie gesperrt</b> — wohl aber
+                weiterhin geprüft und verbucht. Auffälligkeiten
+                erscheinen als Befund in der Sperrliste, damit jemand
+                nachsehen kann.
+            </p>
+            <p>
+                Gedacht für alles, dessen Aussperrung teurer wäre als
+                ein übersehener Angriff: VPN-Gegenstellen, Standort­
+                tunnel, eigene Netze. Einzelne Adressen oder Netze in
+                CIDR-Schreibweise.
+            </p>
+        </field>
+    </record>
+
+</odoo>

@@ -57,6 +57,11 @@ class WebRblEintrag(models.Model):
     befund = fields.Text(
         string="Befund", readonly=True,
         help="Was an dieser Adresse auffällt -- und was zu tun ist.")
+    partner_id = fields.Many2one(
+        "res.partner", string="Kunde", index=True, ondelete="set null",
+        help="Wem gehört dieser Anschluss? Wird aus der Freiliste "
+             "übernommen, sobald dort ein Kunde hinterlegt ist. Damit "
+             "wird aus einem Befund ein Anruf statt einer Adresse.")
     hosts = fields.Char(
         string="Betroffene Domains", readonly=True,
         help="Welche unserer Webseiten diese Adresse angesprochen hat.")
@@ -324,6 +329,34 @@ class WebRblEintrag(models.Model):
             # Treffer nicht angetastet.
             return eintrag
 
+        # DER BEFUND GILT AUCH, WENN GESPERRT WIRD.
+        #
+        # Wer ein Meldemuster scharf schaltet (etwa
+        # ``web_rbl.muster.pflichtseite = sperren``), will nicht die
+        # Begruendung verlieren. Ohne diese Zeilen stuende in der Liste
+        # nur "gesperrt" und ein Pfad -- und in einem halben Jahr
+        # wuesste niemand mehr, warum.
+        # DEN KUNDEN AUS DER FREILISTE UEBERNEHMEN.
+        #
+        # Nur, wenn noch keiner steht: Eine Zuordnung von Hand wiegt
+        # schwerer als eine abgeleitete. Und nur, wenn die Freiliste
+        # ueberhaupt einen nennt -- ein leeres Feld ist ehrlicher als
+        # ein geratener Kunde.
+        if not eintrag.partner_id:
+            frei = self.env["web.rbl.freiliste"].sudo().eintrag_zu(adresse)
+            if frei.partner_id:
+                eintrag.sudo().write({"partner_id": frei.partner_id.id})
+
+        befund_text = BEFUND.get(muster, "")
+        if not befund_text and stufe == MELDEN:
+            # Ein sperrendes Muster, das nur deshalb meldet, weil die
+            # Adresse auf der Freiliste steht. Der Befund muss das
+            # sagen -- sonst steht dort eine Sonde ohne Folge und
+            # niemand versteht, warum.
+            befund_text = BEFUND.get("freiliste", "")
+        if befund_text and eintrag.befund != befund_text:
+            eintrag.sudo().write({"befund": befund_text})
+
         # EINE FEHLKONFIGURATION IST KEINE VORSTUFE EINER SPERRE.
         #
         # Ein Qsync-Client, der seit Wochen unsere Webseite fuer sein
@@ -348,7 +381,6 @@ class WebRblEintrag(models.Model):
                 "tage_auffaellig": len(set(eintrag.treffer_ids.mapped("tag"))),
             }
             if stufe == MELDEN:
-                werte["befund"] = BEFUND.get(muster, "")
                 if eintrag.zustand == "beobachtet":
                     # Ein Sammler ist keine Fehlkonfiguration. Beides
                     # wird gemeldet statt gesperrt, aber das eine ruft
@@ -713,6 +745,15 @@ class WebRblEintrag(models.Model):
                     f"{self._haupt_muster()}",
             "description": beschreibung,
         }
+        # Den Kunden mitgeben, wenn er bekannt ist -- das ist der
+        # Unterschied zwischen "irgendeine Adresse klopft" und "bei
+        # diesem Kunden klemmt etwas".
+        #
+        # Angelegt wird trotzdem stumm: kein Abonnent, keine Post. Ob
+        # der Kunde davon erfaehrt, entscheidet ein Mensch, nicht ein
+        # Cronlauf.
+        if self.partner_id and "partner_id" in Ticket._fields:
+            werte["partner_id"] = self.partner_id.id
         for feld, schluessel in (("team_id", "web_rbl.ticket_team_id"),
                                  ("category_id", "web_rbl.ticket_kategorie_id"),
                                  ("user_id", "web_rbl.ticket_bearbeiter_id")):

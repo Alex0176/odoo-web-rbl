@@ -93,6 +93,10 @@ BEFUND = {
               "Kalender) zeigt auf diese Domain.",
     "synology": "Synology-NAS: DSM-Web-API zeigt auf diese Webseite "
                 "statt auf das NAS.",
+    "freiliste": "Diese Adresse steht auf der Freiliste und wird "
+                 "deshalb nie gesperrt -- gemeldet schon. Nachsehen, "
+                 "ob dort etwas klemmt oder ob der Freilisteneintrag "
+                 "nicht mehr stimmt.",
     "pflichtseite": "Impressum, Kontakt oder Datenschutz in einer "
                     "Schreibweise, die es bei uns nicht gibt -- das "
                     "Muster eines Sammlers, der Pflichtangaben "
@@ -119,9 +123,25 @@ MUSTER = (
     # ``/cgi-bin/`` allein taugt nicht: Dort liegen gemessene 605
     # Qsync-Aufrufe neben 28 ``info.cgi`` und 27 ``printenv.pl``, und
     # die beiden letzten sind Sonden.
+    # Bewusst BREITER gefasst als die vier gemessenen Dateinamen.
+    #
+    # Sobald ``.cgi`` wieder sperrt (siehe Muster ``cgi`` weiter
+    # unten), entscheidet dieses Muster darueber, ob das NAS eines
+    # Kunden gesperrt wird oder gemeldet. Genau daran ist am
+    # 24.09.2026 eine IPsec-Gegenstelle gescheitert.
+    #
+    # Die vier Dateinamen sind das, was WIR gesehen haben -- ein
+    # anderes QNAP-Modell oder eine andere Firmware ruft andere auf.
+    # Deshalb gilt jeder ``.cgi``-Aufruf in einem QNAP-typischen
+    # Verzeichnis als Fehlkonfiguration. Diese Verzeichnisse kommen in
+    # Sondierungen nicht vor; die zielen auf /cgi-bin/ selbst
+    # (printenv.pl, info.cgi, test-cgi).
     ("qnap", MELDEN, re.compile(
-        r"/cgi-bin/(filemanager/qsyncPrepare|qsync/qsyncsrvPrepare|"
-        r"authLogin|sysinfoReq)\.cgi", re.I)),
+        r"/cgi-bin/("
+        r"(filemanager|qsync|qpkg|mgmt|application|photo|music|video)/"
+        r"[^/?]*\.cgi"
+        r"|(authLogin|sysinfoReq|qsyncPrepare|qsyncsrvPrepare)\.cgi"
+        r")", re.I)),
     ("autodiscover", MELDEN, re.compile(
         r"/autodiscover/autodiscover\.(xml|json)", re.I)),
     ("activesync", MELDEN, re.compile(
@@ -170,6 +190,22 @@ MUSTER = (
     # auf die eigenen Seiten immer wieder Unbeteiligte.
     ("altendung", ZAEHLEN, re.compile(
         r"\.(asp|aspx|jsp|jspa)($|\?)", re.I)),
+    # ``.cgi`` SPERRT WIEDER -- aber erst hier, nach den
+    # Fehlkonfigurationen.
+    #
+    # Am 25.09.2026 frueh hatte ich ``.cgi`` ersatzlos gestrichen,
+    # weil es eine IPsec-Gegenstelle gesperrt hatte. Das war die
+    # richtige Sofortmassnahme und die falsche Dauerloesung: Odoo
+    # liefert kein einziges CGI aus, also ist JEDER ``.cgi``-Aufruf
+    # entweder eine Sondierung oder ein Geraet, das uns verwechselt.
+    #
+    # Die Unterscheidung leistet jetzt die Reihenfolge: Was nach QNAP
+    # oder Synology aussieht, ist oben schon als "melden" abgefangen
+    # und kommt hier gar nicht an. Was uebrig bleibt, ist
+    # /cgi-bin/printenv.pl, /cgi-bin/info.cgi, /cgi-bin/test-cgi --
+    # Sonden aus den Neunzigern, die bis heute jeder Scanner mitfuehrt.
+    ("cgi", SPERREN, re.compile(
+        r"\.(cgi|pl)($|\?|/)", re.I)),
     ("dbtool", SPERREN, re.compile(
         r"(^|/)(phpmyadmin|pma|adminer|mysqladmin)(/|$)", re.I)),
     ("shell", SPERREN, re.compile(
@@ -220,6 +256,23 @@ class IrHttp(models.AbstractModel):
         Eintrag = request.env["web.rbl.eintrag"].sudo()
         sperren = Parameter.get_param("web_rbl.sperren_aktiv", "0") == "1"
 
+        # DIE FREILISTE STEHT VOR ALLEM ANDEREN.
+        #
+        # Nicht jede falsch beurteilte Adresse kostet gleich viel. Ein
+        # Scanner aus einem Rechenzentrum kostet nichts -- die
+        # Gegenstelle eines Standorttunnels kostet den Standort. Am
+        # 24.09.2026 hat ein zu breites Muster genau das getroffen:
+        # 4.649 verworfene Pakete, und der Tunnel stand nur deshalb
+        # noch, weil seine Sicherheitsverbindung aelter war als der
+        # Listeneintrag.
+        #
+        # Wer hier steht, wird weiterhin geprueft und weiterhin
+        # verbucht -- nur die Folge entfaellt. Das ist der Unterschied
+        # zu einer Ausnahme in der Firewall: Die macht blind, diese
+        # macht nur geduldig.
+        freigestellt = request.env["web.rbl.freiliste"].sudo().ist_frei(
+            adresse)
+
         # 0. HAT JEMAND EINEN KANARIENWERT ABGERUFEN?
         #
         # Das steht VOR der Mustererkennung, weil es die schärfere
@@ -233,6 +286,11 @@ class IrHttp(models.AbstractModel):
             return cls._rbl_abweisen(Parameter)
 
         muster, stufe = cls._rbl_muster(path_info, Parameter)
+        if freigestellt and stufe == SPERREN:
+            # Erfassen ja, sperren nein. Der Treffer steht damit als
+            # Befund in der Liste, und jemand kann beim Kunden
+            # anrufen, statt dass der Tunnel stirbt.
+            stufe = MELDEN
 
         # 1. IST DIE ADRESSE SCHON GESPERRT? DANN SOFORT UND BILLIG.
         #
@@ -255,7 +313,7 @@ class IrHttp(models.AbstractModel):
         #
         # Die Abfrage selbst läuft auf dem Cursor der Anfrage und kostet
         # keine zusätzliche Verbindung.
-        if Eintrag.ist_gesperrt(adresse):
+        if not freigestellt and Eintrag.ist_gesperrt(adresse):
             if sperren or muster:
                 return cls._rbl_abweisen(Parameter)
             return None

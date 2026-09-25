@@ -2,3 +2,4 @@ id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
 access_web_rbl_eintrag_manager,web.rbl.eintrag.manager,model_web_rbl_eintrag,web_rbl.group_web_rbl_manager,1,1,1,1
 access_web_rbl_treffer_manager,web.rbl.treffer.manager,model_web_rbl_treffer,web_rbl.group_web_rbl_manager,1,0,0,1
 access_web_rbl_koeder_manager,web.rbl.koeder.manager,model_web_rbl_koeder,web_rbl.group_web_rbl_manager,1,0,0,1
+access_web_rbl_freiliste_manager,web.rbl.freiliste.manager,model_web_rbl_freiliste,web_rbl.group_web_rbl_manager,1,1,1,1

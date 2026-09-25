@@ -73,6 +73,21 @@
             <field name="value">0</field>
         </record>
 
+        <!--
+            Die Freiliste fuehrt sich selbst nach. Ohne Adresse in
+            web_rbl.freiliste_quelle_url tut der Lauf nichts; er ist
+            deshalb gefahrlos eingeschaltet.
+        -->
+        <record id="cron_gegenstellen" model="ir.cron">
+            <field name="name">Web RBL: VPN-Gegenstellen abgleichen</field>
+            <field name="model_id" ref="model_web_rbl_freiliste"/>
+            <field name="state">code</field>
+            <field name="code">model._cron_gegenstellen_abgleichen()</field>
+            <field name="interval_number">1</field>
+            <field name="interval_type">days</field>
+            <field name="active" eval="True"/>
+        </record>
+
         <record id="cron_befunde_melden" model="ir.cron">
             <field name="name">Web RBL: Befunde als Ticket melden</field>
             <field name="model_id" ref="model_web_rbl_eintrag"/>

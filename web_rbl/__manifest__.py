@@ -34,6 +34,7 @@ Textliste veröffentlicht, wie HAProxy, nftables und ipset sie lesen.
         "security/ir.model.access.csv",
         "data/web_rbl_data.xml",
         "views/web_rbl_views.xml",
+        "views/web_rbl_freiliste_views.xml",
         "views/web_rbl_menu.xml",
     ],
     "installable": True,

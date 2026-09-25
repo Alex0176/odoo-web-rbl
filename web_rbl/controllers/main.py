@@ -106,6 +106,9 @@ class WebRblController(http.Controller):
             ("zustand", "=", "hochrisiko"),
             "&", ("zustand", "=", "gesperrt"), ("gesperrt_bis", ">", jetzt),
         ])
+        Freiliste = request.env["web.rbl.freiliste"].sudo()
+        eintraege = eintraege.filtered(
+            lambda e: not Freiliste.ist_frei(e.adresse))
         daten = [{
             "adresse": e.adresse,
             "zustand": e.zustand,
@@ -148,4 +151,16 @@ class WebRblController(http.Controller):
             ("zustand", "=", "hochrisiko"),
             "&", ("zustand", "=", "gesperrt"), ("gesperrt_bis", ">", jetzt),
         ], ["adresse"], order="adresse")
-        return sorted({e["adresse"] for e in eintraege if e["adresse"]})
+        # LETZTE SCHRANKE VOR DER FIREWALL.
+        #
+        # Eine Adresse auf der Freiliste kann hier eigentlich gar nicht
+        # mehr stehen: Beim Aufnehmen werden bestehende Sperren
+        # geloest, und neue entstehen nicht mehr. "Eigentlich" ist
+        # aber zu wenig fuer eine Liste, aus der eine Firewall
+        # unbesehen Regeln baut -- ein von Hand gesetzter Zustand, ein
+        # Einspielen aus einer Sicherung, und die Zusage waere
+        # gebrochen, ohne dass es jemand merkt.
+        Freiliste = request.env["web.rbl.freiliste"].sudo()
+        return sorted({
+            e["adresse"] for e in eintraege
+            if e["adresse"] and not Freiliste.ist_frei(e["adresse"])})

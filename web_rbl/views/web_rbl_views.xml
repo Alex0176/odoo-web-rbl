@@ -12,6 +12,7 @@
                   decoration-muted="zustand == 'frei'">
                 <field name="adresse"/>
                 <field name="zustand"/>
+                <field name="partner_id" optional="show"/>
                 <field name="treffer_anzahl" sum="Treffer gesamt"/>
                 <field name="tage_auffaellig"/>
                 <field name="hosts_anzahl" optional="show"/>
@@ -72,6 +73,7 @@
                             <field name="treffer_anzahl"/>
                             <field name="tage_auffaellig"/>
                             <field name="letzter_pfad"/>
+                            <field name="partner_id"/>
                         </group>
                         <group>
                             <field name="erstmals"/>
