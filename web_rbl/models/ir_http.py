@@ -53,7 +53,51 @@ _logger = logging.getLogger(__name__)
 # einer lohnenden Zieldatei. Diese Verbindung hat keine harmlose
 # Lesart, und sie ist der Fall, der in unseren Protokollen tatsächlich
 # vorkommt (``/@fs/../../.env``).
-SPERREN, ZAEHLEN = "sperren", "zaehlen"
+#
+# DIE DRITTE STUFE: MELDEN
+# -------------------------
+# Zwischen "sperren" und "zaehlen" fehlte eine Aussage. Nicht jede
+# Anfrage, die ins Leere läuft, ist ein Angriff -- manche sind ein
+# DEFEKT, und zwar einer, den jemand beheben sollte.
+#
+# Gemessen über siebzehn Tage:
+#     605  /cgi-bin/filemanager/qsyncPrepare.cgi
+#     581  /cgi-bin/qsync/qsyncsrvPrepare.cgi
+#     193  /cgi-bin/authLogin.cgi
+#      65  /autodiscover/autodiscover.xml (alle Schreibweisen)
+#
+# Das sind keine Sondierungen. Das ist ein Qsync-Client, der seit
+# Wochen glaubt, unsere Webseite sei sein NAS, und ein Outlook, das
+# uns für seinen Exchange hält. Beides Fehlkonfigurationen bei einem
+# Kunden oder bei uns -- beides behebbar, sobald man WEISS, welche
+# Adresse es betrifft.
+#
+# "melden" verbucht solche Anfragen mit einem Befund und sperrt NIE.
+# Ein defekter Sync-Client ist kein Angreifer; ihn auszusperren behebt
+# nichts, sondern verbirgt nur den Defekt.
+SPERREN, ZAEHLEN, MELDEN = "sperren", "zaehlen", "melden"
+
+# Was der Befund dem Menschen sagt, der die Liste ansieht. Ohne diesen
+# Satz ist ein Eintrag nur eine Adresse mit einem Pfad; mit ihm ist er
+# ein Anruf beim Kunden.
+BEFUND = {
+    "qnap": "QNAP-NAS: Qsync-Client oder Anmeldung zeigt auf diese "
+            "Webseite statt auf das NAS. Beim Anschlussinhaber die "
+            "Serveradresse im Qsync-Client richtigstellen.",
+    "autodiscover": "Outlook/Exchange-Autodiscover fragt diese Domain "
+                    "ab. Entweder ein falsch eingerichtetes Postfach "
+                    "oder ein fehlender Autodiscover-Eintrag im DNS.",
+    "activesync": "ActiveSync-Gerät (Handy/Tablet) zeigt auf diese "
+                  "Domain statt auf den Mailserver.",
+    "webdav": "WebDAV-/CalDAV-/CardDAV-Client (Nextcloud, ownCloud, "
+              "Kalender) zeigt auf diese Domain.",
+    "synology": "Synology-NAS: DSM-Web-API zeigt auf diese Webseite "
+                "statt auf das NAS.",
+    "pflichtseite": "Impressum, Kontakt oder Datenschutz in einer "
+                    "Schreibweise, die es bei uns nicht gibt -- das "
+                    "Muster eines Sammlers, der Pflichtangaben "
+                    "durchprobiert. Siehe web_rbl.muster.pflichtseite.",
+}
 
 MUSTER = (
     ("traversal_ziel", SPERREN, re.compile(
@@ -62,6 +106,33 @@ MUSTER = (
         r"environ|config\.|credentials|\.pem)", re.I)),
     ("traversal", ZAEHLEN, re.compile(
         r"(\.\./|\.\.%2f|%2e%2e|%252e|\.\.\\)", re.I)),
+
+    # ---- FEHLKONFIGURATIONEN -----------------------------------------
+    #
+    # Diese Muster stehen VOR ``php`` und ``konfig``, weil sonst
+    # ``/remote.php/dav`` als PHP-Sonde gälte und ein Nextcloud-Client
+    # gesperrt würde. Sie stehen HINTER ``traversal``, damit
+    # ``/cgi-bin/../../.env`` die Sonde bleibt, die es ist -- der
+    # Verzeichniswechsel wiegt schwerer als das Verzeichnis.
+    #
+    # Alle Muster nennen EXAKTE Dateinamen, nie nur ein Verzeichnis.
+    # ``/cgi-bin/`` allein taugt nicht: Dort liegen gemessene 605
+    # Qsync-Aufrufe neben 28 ``info.cgi`` und 27 ``printenv.pl``, und
+    # die beiden letzten sind Sonden.
+    ("qnap", MELDEN, re.compile(
+        r"/cgi-bin/(filemanager/qsyncPrepare|qsync/qsyncsrvPrepare|"
+        r"authLogin|sysinfoReq)\.cgi", re.I)),
+    ("autodiscover", MELDEN, re.compile(
+        r"/autodiscover/autodiscover\.(xml|json)", re.I)),
+    ("activesync", MELDEN, re.compile(
+        r"/Microsoft-Server-ActiveSync", re.I)),
+    ("webdav", MELDEN, re.compile(
+        r"(/remote\.php/(dav|webdav)|/ocs/v[12]\.php|"
+        r"/\.well-known/(caldav|carddav)|^/principals/)", re.I)),
+    ("synology", MELDEN, re.compile(
+        r"/(webapi/(auth|entry|query)\.cgi|webman/index\.cgi)", re.I)),
+    # -------------------------------------------------------------------
+
     ("dotenv", SPERREN, re.compile(
         r"(^|/)\.env(\.|$|\?)|/\.env[a-z.]*$", re.I)),
     ("vcs", SPERREN, re.compile(
@@ -203,8 +274,33 @@ class IrHttp(models.AbstractModel):
         # lässt sich nachsehen, was da eigentlich hereinkommt, bevor man
         # ihn scharf schaltet.
         if muster:
-            Eintrag.treffer_eigene_transaktion(adresse, path_info, muster)
+            # Die Domain gehoert zum Treffer, nicht nur der Pfad.
+            #
+            # Wir betreiben fuenf Webseiten hinter einem HAProxy. Ohne
+            # den Host sagt ein Eintrag nur, DASS jemand klopft -- mit
+            # ihm sagt er, WO. Das entscheidet zwei Fragen, die sich
+            # sonst nicht beantworten lassen:
+            #
+            # * Bei einer Fehlkonfiguration: welchem Kunden gehoert die
+            #   Domain, auf die sein NAS zeigt? Ohne das ist der Befund
+            #   ein Achselzucken.
+            # * Bei einem Sammler: greift er EINE Seite an oder alle
+            #   fuenf? Der Rundumschlag ueber nicht zusammenhaengende
+            #   Hosts ist genau die Signatur der Abmahnwelle 2022.
+            #
+            # Das Zugriffsprotokoll von werkzeug enthaelt den Host
+            # NICHT -- nachtraeglich ist das nicht zu ermitteln. Nur
+            # hier, zur Laufzeit, ist er zu haben.
+            try:
+                host = (request.httprequest.host or "")[:120]
+            except Exception:  # noqa: BLE001
+                host = ""
+            Eintrag.treffer_eigene_transaktion(
+                adresse, path_info, muster, host, stufe)
             if stufe != SPERREN:
+                # "zaehlen" und "melden" lassen durch. Ein defekter
+                # Sync-Client wird nicht ausgesperrt, sondern gemeldet:
+                # Sperren behebt den Defekt nicht, es verbirgt ihn.
                 return None
             # Köder statt Abweisung -- nur wenn eingeschaltet und die
             # Obergrenze je Adresse noch nicht erreicht ist.
@@ -228,9 +324,72 @@ class IrHttp(models.AbstractModel):
     #
     # Wer das Impressum sucht, greift nicht an. Diese Namen sind
     # deshalb von jedem Muster ausgenommen.
-    PFLICHTSEITEN = re.compile(
-        r"/(impressum|imprint|kontakt|contact|datenschutz|privacy|"
-        r"agb|terms|sitemap|robots)([./]|$)", re.I)
+    # WARUM DAS IMPRESSUM NICHT HARMLOS IST
+    # --------------------------------------
+    # Die erste Fassung nahm Pflichtseiten von JEDEM Muster aus: "Wer
+    # das Impressum sucht, greift nicht an." Das ist zu gutgläubig.
+    #
+    # In Österreich lief 2022 eine Abmahnwelle wegen eingebundener
+    # Google-Fonts. Die Analyse der Hosting-Protokolle zeigte damals,
+    # dass die Schreiben nicht aus Einzelbesuchen stammten, sondern aus
+    # einem automatisierten Rundumschlag: verschiedene, nicht
+    # zusammenhängende Hosts IM ABSTAND VON MILLISEKUNDEN, offenkundig
+    # ein Headless-Browser. Das Impressum ist dabei kein Beiwerk,
+    # sondern das Ziel -- dort steht der Name, an den der Brief geht.
+    #
+    # Eine Pflichtangabe ist öffentlich, aber ihre maschinelle Ernte im
+    # Bestand ist etwas anderes als ein Mensch, der nachsieht, mit wem
+    # er es zu tun hat. Wer die Daten redlich braucht, bekommt sie aus
+    # Firmenbuch, GISA oder WKO-Verzeichnis -- nicht durch Abgrasen
+    # fremder Webseiten.
+    #
+    # ZWEI SÄTZE, DIE BEIDE GELTEN MÜSSEN
+    # ------------------------------------
+    # 1. Das Impressum MUSS für Menschen erreichbar bleiben. Es ist
+    #    gesetzlich gefordert; eine Sperre, die es verdeckt, schafft
+    #    genau den Verstoß, den der Sammler sucht. Gemessen: 2.836
+    #    Aufrufe von ``/contactus``, 496 von ``/kontakt``, aus 999
+    #    verschiedenen Adressen. Das sind Besucher.
+    # 2. Wer Pflichtangaben MASCHINELL durchprobiert, gibt sich zu
+    #    erkennen -- durch Schreibweisen, die es bei uns nicht gibt.
+    #    Gemessen: ``/impressum.php`` 24, ``.htm`` 22, ``.asp`` 21,
+    #    ``.html`` 30. Unsere Seiten haben keine Dateiendungen.
+    #
+    # Deshalb wird hier nicht ausgenommen, sondern HERABGESTUFT: Trifft
+    # irgendein Muster auf eine Pflichtseite, heißt der Treffer
+    # ``pflichtseite`` und bekommt dessen Stufe. Die Vorgabe ist
+    # ``melden`` -- erfassen, durchlassen, sichtbar machen. Wer die
+    # Ernte nicht will, stellt einen Parameter um::
+    #
+    #     web_rbl.muster.pflichtseite = sperren
+    #
+    # Der kanonische Pfad ``/impressum`` trifft auf KEIN Muster und
+    # kommt hier gar nicht erst an -- er bleibt auch dann erreichbar,
+    # wenn gesperrt wird. Betroffen sind nur die Schreibweisen, die
+    # ein Mensch nie eintippt.
+    # NICHT JEDE PFLICHTSEITE TRAEGT EINEN NAMEN.
+    #
+    # Gemessen am 25.09.2026 ueber siebzehn Tage: Von 24 Adressen, die
+    # Pflichtseiten in fremden Schreibweisen abriefen, entfielen 14 auf
+    # den Bereich 57.141.20.x -- Meta -- mit je genau einem Aufruf von
+    # ``/SiteMap.aspx``. Das ist ein Suchmaschinen-Crawler, der einem
+    # alten Link auf unsere fruehere ASP-Fassung folgt. Wer die
+    # Sammlersperre einschaltet, wuerde ihn mitnehmen.
+    #
+    # Der Unterschied ist inhaltlich, nicht technisch: ``sitemap.xml``
+    # und ``robots.txt`` sind Maschinendateien ohne eine einzige
+    # personenbezogene Angabe. Sie zu holen ist die Aufgabe jedes
+    # Crawlers. Das Impressum dagegen ist genau die Seite, auf der der
+    # Name und die Anschrift stehen -- das, was ein Abmahnschreiben
+    # braucht.
+    #
+    # Deshalb zwei Ausdruecke: Der eine kann auf Wunsch sperren, der
+    # andere nie.
+    IDENTITAETSSEITEN = re.compile(
+        r"/(impressum|imprint|kontakt\w*|contact(us|s|-us)?|datenschutz|"
+        r"privacy|agbs?|terms)([./]|$)", re.I)
+    MASCHINENSEITEN = re.compile(
+        r"/(sitemap\w*|robots|\.well-known/security)([./]|$)", re.I)
 
     @classmethod
     def _rbl_muster(cls, pfad, Parameter=None):
@@ -248,15 +407,25 @@ class IrHttp(models.AbstractModel):
             web_rbl.muster.php        = zaehlen
         """
         pfad = pfad or ""
-        if cls.PFLICHTSEITEN.search(pfad):
-            return "", ""
         for name, vorgabe, regel in MUSTER:
             if not regel.search(pfad):
                 continue
+            # Eine Pflichtseite wird herabgestuft, egal welches Muster
+            # sie getroffen hat. Das ist zugleich das Sicherheitsnetz
+            # fuer jedes kuenftige Muster: Das Impressum kann nicht
+            # versehentlich gesperrt werden, sondern nur absichtlich.
+            if cls.MASCHINENSEITEN.search(pfad):
+                # sitemap/robots: immer nur zaehlen, nie sperrbar.
+                # Kein Parameter hebt das auf -- ein Crawler, der
+                # robots.txt holt, tut genau das, was wir von ihm
+                # wollen.
+                return "maschinenseite", ZAEHLEN
+            if cls.IDENTITAETSSEITEN.search(pfad):
+                name, vorgabe = "pflichtseite", MELDEN
             stufe = vorgabe
             if Parameter is not None:
                 gesetzt = Parameter.get_param(f"web_rbl.muster.{name}")
-                if gesetzt in (SPERREN, ZAEHLEN):
+                if gesetzt in (SPERREN, ZAEHLEN, MELDEN):
                     stufe = gesetzt
             return name, stufe
         return "", ""

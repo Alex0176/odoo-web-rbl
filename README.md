@@ -129,8 +129,71 @@ ein Signal. Wer das einschaltet, soll es bewusst tun.
 | `web_rbl.token` | — | Ohne Token liefert der Endpunkt nichts |
 | `web_rbl.koeder_aktiv` | `0` | Köderantworten statt 403 |
 | `web_rbl.koeder_max` | `5` | Höchstzahl Köder je Adresse |
-| `web_rbl.muster.<name>` | — | `sperren` oder `zaehlen` je Muster |
+| `web_rbl.muster.<name>` | — | `sperren`, `zaehlen` oder `melden` je Muster |
+| `web_rbl.muster.pflichtseite` | `melden` | Auf `sperren` stellen, um das maschinelle Abgrasen von Impressumsdaten auszusperren |
 | `web_rbl.treffer_aufbewahrung` | `30` | Tage, bevor alte Treffer entfernt werden |
+
+## Die drei Stufen
+
+| Stufe | Auslösende Anfrage | Folge für die Adresse |
+|---|---|---|
+| `sperren` | abgewiesen | 24 h gesperrt, nach drei Tagen dauerhaft |
+| `zaehlen` | durchgelassen | nur verbucht — keine Sperre |
+| `melden` | durchgelassen | verbucht, mit Befund, Zustand `Fehlkonfiguration` bzw. `Sammler` — **nie** gesperrt |
+
+`zaehlen` und `melden` erreichen die ausgelieferte Sperrliste nicht: Der
+Endpunkt zählt die sperrenden Zustände einzeln auf, statt die anderen
+auszuschließen. Ein neuer Zustand landet damit nie versehentlich in
+einer Firewall.
+
+## Fehlkonfigurationen statt Sperren
+
+Nicht jede Anfrage ins Leere ist ein Angriff. Über siebzehn Tage
+Echtverkehr gemessen:
+
+| Muster | Anfragen | Was dahintersteckt |
+|---|---|---|
+| `qnap` | 1.367 | Qsync-Client, der die Webseite für sein NAS hält |
+| `autodiscover` | 65 | Outlook, das die Domain für seinen Exchange hält |
+
+Solche Adressen werden **nie** gesperrt. Eine Sperre behebt den Defekt
+nicht, sie verbirgt ihn — und trifft dabei denjenigen, dessen Gerät
+kaputt konfiguriert ist. Stattdessen sammelt das Modul sie in einer
+Arbeitsliste mit Befund und den betroffenen Domains, damit jemand
+anrufen kann.
+
+Am 24.09.2026 hat genau dieser Fall einen Kunden ausgesperrt: Das
+`.cgi`-Muster hielt die QNAP-Web-API für eine Sondierung, die Firewall
+verwarf 4.649 Pakete einer IPsec-Gegenstelle.
+
+## Pflichtseiten und Sammler
+
+Das Impressum ist keine gewöhnliche Seite. Es muss für Menschen
+erreichbar bleiben — eine Sperre schafft genau den Verstoß, den ein
+Abmahnschreiben sucht. Zugleich ist es die Seite, auf der Name und
+Anschrift stehen, und damit das Ziel maschineller Ernte: Bei der
+österreichischen Google-Fonts-Abmahnwelle zeigten die Protokolle
+Zugriffe auf nicht zusammenhängende Hosts im Abstand von
+Millisekunden — ein Headless-Browser, kein Besucher.
+
+Das Modul unterscheidet deshalb:
+
+* **Kanonische Pfade** (`/impressum`, `/kontakt`, `/contactus`) treffen
+  auf kein Muster. Sie werden nie verbucht und nie gesperrt — auch
+  nicht, wenn die Sammlersperre eingeschaltet ist.
+* **Fremde Schreibweisen** (`/impressum.php`, `/impressum.asp`) sind
+  das Kennzeichen des Durchprobierens. Sie werden gemeldet, und wer
+  will, stellt `web_rbl.muster.pflichtseite = sperren`.
+* **Maschinendateien** (`sitemap`, `robots`) sind davon ausgenommen und
+  **nicht** sperrbar. Sie enthalten keine personenbezogene Angabe, und
+  sie zu holen ist die Aufgabe jedes Crawlers. Gemessen: 14 von 24
+  auffälligen Adressen waren Suchmaschinen-Crawler, die einem alten
+  Link auf `/SiteMap.aspx` folgten.
+
+Jeder Treffer hält außerdem fest, **welche Domain** angesprochen wurde.
+Das Zugriffsprotokoll von werkzeug enthält den Host nicht; er ist nur
+zur Laufzeit zu bekommen. Mehrere nicht zusammenhängende Domains
+derselben Adresse sind das Kennzeichen des Rundumschlags.
 
 Wird ein Parameter von außerhalb des laufenden Prozesses gesetzt (etwa
 über `odoo-bin shell`), greift er erst nach einem Neustart. Über die

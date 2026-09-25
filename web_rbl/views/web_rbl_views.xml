@@ -8,15 +8,19 @@
             <list decoration-bf="zustand == 'hochrisiko'"
                   decoration-danger="zustand in ('dauerhaft', 'hochrisiko')"
                   decoration-warning="zustand == 'gesperrt'"
+                  decoration-info="zustand in ('fehlkonfiguration', 'sammler')"
                   decoration-muted="zustand == 'frei'">
                 <field name="adresse"/>
                 <field name="zustand"/>
                 <field name="treffer_anzahl" sum="Treffer gesamt"/>
                 <field name="tage_auffaellig"/>
+                <field name="hosts_anzahl" optional="show"/>
+                <field name="hosts" optional="show"/>
                 <field name="erstmals"/>
                 <field name="zuletzt"/>
                 <field name="gesperrt_bis"/>
                 <field name="letzter_pfad" optional="show"/>
+                <field name="befund" optional="hide"/>
                 <button name="action_freigeben" type="object"
                         string="Freigeben" icon="fa-unlock"
                         invisible="zustand == 'frei'"/>
@@ -52,6 +56,10 @@
                     <div class="oe_title">
                         <h1><field name="adresse" readonly="1"/></h1>
                     </div>
+                    <div class="alert alert-info" role="alert"
+                         invisible="not befund">
+                        <field name="befund" nolabel="1" readonly="1"/>
+                    </div>
                     <group>
                         <group>
                             <field name="treffer_anzahl"/>
@@ -63,6 +71,10 @@
                             <field name="zuletzt"/>
                             <field name="gesperrt_bis"/>
                         </group>
+                    </group>
+                    <group string="Betroffene Domains">
+                        <field name="hosts_anzahl"/>
+                        <field name="hosts" nolabel="1" colspan="2"/>
                     </group>
                     <group string="Notiz">
                         <field name="notiz" nolabel="1"
@@ -87,6 +99,7 @@
                                 <list>
                                     <field name="tag"/>
                                     <field name="muster"/>
+                                    <field name="host"/>
                                     <field name="pfad"/>
                                 </list>
                             </field>
@@ -104,6 +117,7 @@
             <search>
                 <field name="adresse"/>
                 <field name="letzter_pfad"/>
+                <field name="hosts" string="Domain"/>
                 <filter name="f_gesperrt" string="Zurzeit gesperrt"
                         domain="['|', ('zustand', '=', 'dauerhaft'),
                                  '&amp;', ('zustand', '=', 'gesperrt'),
@@ -117,11 +131,23 @@
                 <filter name="f_frei" string="Freigegeben"
                         domain="[('zustand', '=', 'frei')]"/>
                 <separator/>
+                <filter name="f_fehlkonfiguration" string="Fehlkonfigurationen"
+                        domain="[('zustand', '=', 'fehlkonfiguration')]"
+                        help="Defekte Software, die uns für etwas anderes hält. Wird nie gesperrt."/>
+                <filter name="f_sammler" string="Sammler"
+                        domain="[('zustand', '=', 'sammler')]"
+                        help="Probiert Pflichtangaben in Schreibweisen durch, die es bei uns nicht gibt."/>
+                <separator/>
                 <filter name="f_wiederholt" string="An mehreren Tagen auffällig"
                         domain="[('tage_auffaellig', '&gt;', 1)]"/>
+                <filter name="f_rundumschlag" string="Mehrere Domains"
+                        domain="[('hosts_anzahl', '&gt;', 1)]"
+                        help="Dieselbe Adresse hat mehrere unserer Webseiten angesprochen."/>
                 <group>
                     <filter name="g_zustand" string="Zustand"
                             context="{'group_by': 'zustand'}"/>
+                    <filter name="g_hosts" string="Domain"
+                            context="{'group_by': 'hosts'}"/>
                 </group>
             </search>
         </field>

@@ -44,11 +44,26 @@ class WebRblEintrag(models.Model):
         string="Adresse", required=True, index=True, readonly=True)
     zustand = fields.Selection(
         [("beobachtet", "Beobachtet"),
+         ("fehlkonfiguration", "Fehlkonfiguration"),
+         ("sammler", "Sammler"),
          ("gesperrt", "Gesperrt"),
          ("dauerhaft", "Dauerhaft gesperrt"),
          ("hochrisiko", "Hochrisiko"),
          ("frei", "Freigegeben")],
-        string="Zustand", default="beobachtet", required=True, index=True)
+        string="Zustand", default="beobachtet", required=True, index=True,
+        help="'Fehlkonfiguration' ist keine Vorstufe einer Sperre, "
+             "sondern eine Arbeitsliste: Dort klopft defekte Software, "
+             "kein Angreifer. Eine Sperre behebt den Defekt nicht.")
+    befund = fields.Text(
+        string="Befund", readonly=True,
+        help="Was an dieser Adresse auffällt -- und was zu tun ist.")
+    hosts = fields.Char(
+        string="Betroffene Domains", readonly=True,
+        help="Welche unserer Webseiten diese Adresse angesprochen hat.")
+    hosts_anzahl = fields.Integer(
+        string="Domains", default=0, readonly=True, index=True,
+        help="Mehrere nicht zusammenhängende Domains derselben Adresse "
+             "sind das Kennzeichen eines maschinellen Rundumschlags.")
     treffer_anzahl = fields.Integer(
         string="Trefferzahl", default=0, readonly=True)
     tage_auffaellig = fields.Integer(
@@ -96,7 +111,8 @@ class WebRblEintrag(models.Model):
     # Treffer verbuchen
     # ------------------------------------------------------------------
     @api.model
-    def treffer_eigene_transaktion(self, adresse, pfad, muster):
+    def treffer_eigene_transaktion(self, adresse, pfad, muster, host="",
+                                   stufe=None):
         """Treffer in einer EIGENEN Transaktion verbuchen.
 
         WARUM DAS NÖTIG IST
@@ -147,7 +163,7 @@ class WebRblEintrag(models.Model):
                 """, (adresse, SUPERUSER_ID, SUPERUSER_ID))
                 eigene = api.Environment(cr, SUPERUSER_ID, {})
                 eintrag = eigene["web.rbl.eintrag"].treffer_buchen(
-                    adresse, pfad, muster)
+                    adresse, pfad, muster, host, stufe)
                 kennung = eintrag.id if eintrag else False
                 cr.commit()
         except Exception:  # noqa: BLE001
@@ -191,10 +207,44 @@ class WebRblEintrag(models.Model):
         return True
 
     @api.model
-    def treffer_buchen(self, adresse, pfad, muster):
-        """Einen Sondierungsversuch verbuchen und die Frist fortschreiben."""
+    def treffer_buchen(self, adresse, pfad, muster, host="", stufe=None):
+        """Einen Sondierungsversuch verbuchen und die Frist fortschreiben.
+
+        ``stufe`` ist ``sperren``, ``zaehlen`` oder ``melden`` -- und
+        sie MUSS bis hierher durchgereicht werden. Ohne sie war der
+        Unterschied zwischen den Stufen nur ein halber:
+
+        DER FEHLER, DEN DAS BEHEBT
+        --------------------------
+        Bis zum 25.09.2026 kannte diese Methode die Stufe nicht und
+        schrieb bei JEDEM Treffer die Frist fort. Ein zählendes Muster
+        ließ damit zwar die auslösende Anfrage durch -- setzte den
+        Eintrag aber auf ``gesperrt``, und die NÄCHSTE Anfrage
+        derselben Adresse lief in die Sperrprüfung.
+
+        "Zählen" hieß also in Wahrheit: eine Anfrage später sperren.
+        Gemessen am Testsystem: ein einziger Aufruf von
+        ``/SiteMap.aspx`` genügte, ``gesperrt_bis`` stand 24 Stunden in
+        der Zukunft.
+
+        Das machte die ganze Unterscheidung wirkungslos -- auch die
+        Entschärfung von ``.asp``/``.aspx`` am selben Tag, die genau
+        das verhindern sollte. Betroffen wäre etwa der Crawler, der
+        einem alten Link auf ``/SiteMap.aspx`` folgt: Er hätte den Link
+        geholt und wäre beim nächsten Abruf ausgesperrt gewesen.
+
+        Jetzt eskaliert nur noch ``sperren``. ``zaehlen`` und
+        ``melden`` verbuchen und lassen in Ruhe -- das ist der
+        Beobachtungsbetrieb, für den sie gedacht sind.
+        """
         if not adresse:
             return self.browse()
+        from .ir_http import BEFUND, MELDEN, SPERREN
+        if stufe is None:
+            # Ein Aufrufer, der die Stufe nicht kennt, meint die
+            # scharfe -- das ist das alte Verhalten und die sichere
+            # Annahme fuer eine Sonde.
+            stufe = SPERREN
         jetzt = fields.Datetime.now()
         heute = fields.Date.context_today(self)
         eintrag = self.sudo().search([("adresse", "=", adresse)], limit=1)
@@ -217,19 +267,37 @@ class WebRblEintrag(models.Model):
         # ist die schnelle Anzeige. Aber eine Anzeige, die bei jedem
         # Ansturm falsch wird, taugt nichts -- und ausgerechnet beim
         # Ansturm schaut man hin.
+        # WELCHE DOMAINS DIESE ADRESSE SCHON ANGESPROCHEN HAT.
+        #
+        # Wird im selben UPDATE mitgeschrieben. Das ist ein
+        # Lesen-Aendern-Schreiben und damit theoretisch ein Lost
+        # Update -- anders als beim Zaehler ist der Schaden hier aber
+        # null: Es fehlt hoechstens ein Domainname, den der naechste
+        # Treffer derselben Adresse wieder ergaenzt. Fuer eine Liste
+        # von Namen einen zweiten Rundlauf zur Datenbank zu bezahlen,
+        # waere im Anfrageweg der teurere Fehler.
+        bekannt = [h for h in (eintrag.hosts or "").split(",") if h]
+        if host and host not in bekannt:
+            bekannt.append(host)
+        bekannt = bekannt[:20]
         eintrag.env.cr.execute("""
             UPDATE web_rbl_eintrag
                SET treffer_anzahl = treffer_anzahl + 1,
                    zuletzt        = %s,
-                   letzter_pfad   = %s
+                   letzter_pfad   = %s,
+                   hosts          = %s,
+                   hosts_anzahl   = %s
              WHERE id = %s
-        """, (jetzt, (pfad or "")[:255], eintrag.id))
+        """, (jetzt, (pfad or "")[:255], ",".join(bekannt), len(bekannt),
+              eintrag.id))
         eintrag.invalidate_recordset(
-            ["treffer_anzahl", "zuletzt", "letzter_pfad"])
+            ["treffer_anzahl", "zuletzt", "letzter_pfad",
+             "hosts", "hosts_anzahl"])
         self.env["web.rbl.treffer"].sudo().create({
             "eintrag_id": eintrag.id,
             "pfad": (pfad or "")[:255],
             "muster": muster or "",
+            "host": (host or "")[:120],
             "tag": heute,
         })
 
@@ -240,6 +308,41 @@ class WebRblEintrag(models.Model):
             # "frei" ist eine Entscheidung eines Menschen, "hochrisiko"
             # die schaerfste Stufe - beide werden von einem weiteren
             # Treffer nicht angetastet.
+            return eintrag
+
+        # EINE FEHLKONFIGURATION IST KEINE VORSTUFE EINER SPERRE.
+        #
+        # Ein Qsync-Client, der seit Wochen unsere Webseite fuer sein
+        # NAS haelt, klopft zwangslaeufig an vielen Tagen an -- nach
+        # der Drei-Tage-Regel waere er binnen einer Woche DAUERHAFT
+        # gesperrt. Genau so ist am 24.09.2026 ein Kunde auf der Liste
+        # gelandet.
+        #
+        # Deshalb bricht ein Meldemuster hier ab, bevor die Frist
+        # fortgeschrieben wird. Der Eintrag bekommt einen Befund und
+        # bleibt sichtbar; gesperrt wird er nie.
+        #
+        # Mischfall: Wer AUSSERDEM sondiert, wird trotzdem gesperrt --
+        # der naechste Treffer kommt dann mit einem Sperrmuster, laeuft
+        # an dieser Stelle vorbei und schreibt die Frist fort. Ein
+        # defektes NAS schuetzt niemanden, der daneben ``/.env`` sucht.
+        if stufe != SPERREN:
+            werte = {
+                # Die Tageszahl wird trotzdem nachgefuehrt: Sie ist die
+                # Kennzahl, an der man ablesen will, OB ein zaehlendes
+                # Muster scharf geschaltet gehoert.
+                "tage_auffaellig": len(set(eintrag.treffer_ids.mapped("tag"))),
+            }
+            if stufe == MELDEN:
+                werte["befund"] = BEFUND.get(muster, "")
+                if eintrag.zustand == "beobachtet":
+                    # Ein Sammler ist keine Fehlkonfiguration. Beides
+                    # wird gemeldet statt gesperrt, aber das eine ruft
+                    # man beim Kunden an, das andere sieht man sich an.
+                    werte["zustand"] = (
+                        "sammler" if muster == "pflichtseite"
+                        else "fehlkonfiguration")
+            eintrag.sudo().write(werte)
             return eintrag
 
         eintrag.sudo()._frist_fortschreiben(heute, jetzt)
@@ -389,4 +492,9 @@ class WebRblTreffer(models.Model):
         ondelete="cascade", index=True)
     pfad = fields.Char(string="Pfad", readonly=True)
     muster = fields.Char(string="Erkanntes Muster", readonly=True, index=True)
+    host = fields.Char(
+        string="Domain", readonly=True, index=True,
+        help="Welche unserer Webseiten angesprochen wurde. Das "
+             "Zugriffsprotokoll von werkzeug enthält den Host nicht -- "
+             "er ist nur hier, zur Laufzeit, zu bekommen.")
     tag = fields.Date(string="Tag", required=True, index=True)
