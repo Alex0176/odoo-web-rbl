@@ -108,6 +108,7 @@
                                     <field name="muster"/>
                                     <field name="host"/>
                                     <field name="pfad"/>
+                                    <field name="kennung" optional="show"/>
                                 </list>
                             </field>
                         </page>

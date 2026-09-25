@@ -295,6 +295,25 @@ class IrHttp(models.AbstractModel):
                 host = (request.httprequest.host or "")[:120]
             except Exception:  # noqa: BLE001
                 host = ""
+            # DIE KENNUNG KOMMT HIER GENAUSO AN WIE DER HOST.
+            #
+            # Odoo bekommt beide Kopfzeilen -- den Host braucht es
+            # sogar zwingend, sonst koennte es bei fuenf Webseiten gar
+            # nicht die richtige auswaehlen. Nur das Zugriffsprotokoll
+            # von werkzeug schreibt keine von beiden mit.
+            #
+            # Daraus folgt: Fuer alles, was Odoo erreicht, braucht es
+            # keinen Mitschnitt am Reverse Proxy, um zu wissen, WER da
+            # klopft. Die Kennung trennt einen erklaerten Crawler
+            # (GPTBot, Googlebot) von einem Headless-Browser und von
+            # etwas Selbstgebautem -- und das ist der Unterschied
+            # zwischen einem Gast, den man einlaedt, und einem, den
+            # man aussperrt.
+            try:
+                kennung = (
+                    request.httprequest.headers.get("User-Agent") or "")[:255]
+            except Exception:  # noqa: BLE001
+                kennung = ""
             # JE ANFRAGE NUR EINMAL VERBUCHEN.
             #
             # ``_match`` wird für DIESELBE Anfrage mehrfach aufgerufen,
@@ -331,7 +350,7 @@ class IrHttp(models.AbstractModel):
                 if isinstance(umgebung, dict):
                     umgebung["web_rbl.gebucht"] = True
                 Eintrag.treffer_eigene_transaktion(
-                    adresse, path_info, muster, host, stufe)
+                    adresse, path_info, muster, host, stufe, kennung)
             if stufe != SPERREN:
                 # "zaehlen" und "melden" lassen durch. Ein defekter
                 # Sync-Client wird nicht ausgesperrt, sondern gemeldet:

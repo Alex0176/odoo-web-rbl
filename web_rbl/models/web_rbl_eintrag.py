@@ -123,7 +123,7 @@ class WebRblEintrag(models.Model):
     # ------------------------------------------------------------------
     @api.model
     def treffer_eigene_transaktion(self, adresse, pfad, muster, host="",
-                                   stufe=None):
+                                   stufe=None, kennung=""):
         """Treffer in einer EIGENEN Transaktion verbuchen.
 
         WARUM DAS NÖTIG IST
@@ -142,7 +142,7 @@ class WebRblEintrag(models.Model):
         """
         if not adresse:
             return self.browse()
-        kennung = False
+        datensatz_id = False
         try:
             with self.pool.cursor() as cr:
                 # READ COMMITTED, sonst wirkt das ``ON CONFLICT`` unten
@@ -174,8 +174,8 @@ class WebRblEintrag(models.Model):
                 """, (adresse, SUPERUSER_ID, SUPERUSER_ID))
                 eigene = api.Environment(cr, SUPERUSER_ID, {})
                 eintrag = eigene["web.rbl.eintrag"].treffer_buchen(
-                    adresse, pfad, muster, host, stufe)
-                kennung = eintrag.id if eintrag else False
+                    adresse, pfad, muster, host, stufe, kennung)
+                datensatz_id = eintrag.id if eintrag else False
                 cr.commit()
         except Exception:  # noqa: BLE001
             _logger.exception(
@@ -184,7 +184,8 @@ class WebRblEintrag(models.Model):
             return self.browse()
         # Im Environment des Aufrufers zurueckgeben, damit der Koeder
         # damit weiterarbeiten kann.
-        return self.browse(kennung) if kennung else self.browse()
+        return (self.browse(datensatz_id) if datensatz_id
+                else self.browse())
 
     @api.model
     def hochrisiko_eigene_transaktion(self, adresse, kanarie):
@@ -218,7 +219,8 @@ class WebRblEintrag(models.Model):
         return True
 
     @api.model
-    def treffer_buchen(self, adresse, pfad, muster, host="", stufe=None):
+    def treffer_buchen(self, adresse, pfad, muster, host="", stufe=None,
+                       kennung=""):
         """Einen Sondierungsversuch verbuchen und die Frist fortschreiben.
 
         ``stufe`` ist ``sperren``, ``zaehlen`` oder ``melden`` -- und
@@ -309,6 +311,7 @@ class WebRblEintrag(models.Model):
             "pfad": (pfad or "")[:255],
             "muster": muster or "",
             "host": (host or "")[:120],
+            "kennung": (kennung or "")[:255],
             "tag": heute,
         })
 
@@ -797,7 +800,15 @@ class WebRblTreffer(models.Model):
     muster = fields.Char(string="Erkanntes Muster", readonly=True, index=True)
     host = fields.Char(
         string="Domain", readonly=True, index=True,
-        help="Welche unserer Webseiten angesprochen wurde. Das "
-             "Zugriffsprotokoll von werkzeug enthält den Host nicht -- "
-             "er ist nur hier, zur Laufzeit, zu bekommen.")
+        help="Welche unserer Webseiten angesprochen wurde. Odoo bekommt "
+             "den Host selbstverständlich -- es wählt danach die "
+             "Webseite aus. Nur das Zugriffsprotokoll von werkzeug "
+             "schreibt ihn nicht mit, deshalb ist er rückwirkend nicht "
+             "auswertbar, wohl aber hier.")
+    kennung = fields.Char(
+        string="Kennung", readonly=True,
+        help="Die User-Agent-Kennung. Sie unterscheidet einen "
+             "Headless-Browser von einem gewöhnlichen und einen "
+             "erklärten Crawler von etwas Gebautem -- und erreicht "
+             "Odoo genauso wie der Host.")
     tag = fields.Date(string="Tag", required=True, index=True)
