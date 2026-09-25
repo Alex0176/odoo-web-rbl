@@ -12,6 +12,7 @@
                   decoration-muted="zustand == 'frei'">
                 <field name="adresse"/>
                 <field name="zustand"/>
+                <field name="bewertung" widget="progressbar"/>
                 <field name="partner_id" optional="show"/>
                 <field name="treffer_anzahl" sum="Treffer gesamt"/>
                 <field name="tage_auffaellig"/>
@@ -74,6 +75,8 @@
                             <field name="tage_auffaellig"/>
                             <field name="letzter_pfad"/>
                             <field name="partner_id"/>
+                            <field name="bewertung"/>
+                            <field name="bewertung_grund"/>
                         </group>
                         <group>
                             <field name="erstmals"/>
@@ -148,6 +151,9 @@
                         domain="[('zustand', '=', 'sammler')]"
                         help="Probiert Pflichtangaben in Schreibweisen durch, die es bei uns nicht gibt."/>
                 <separator/>
+                <filter name="f_hohe_bewertung" string="Bewertung ab 40"
+                        domain="[('bewertung', '&gt;=', 40)]"
+                        help="Ab dieser Bewertung ist die Anmeldung gesperrt."/>
                 <filter name="f_wiederholt" string="An mehreren Tagen auffällig"
                         domain="[('tage_auffaellig', '&gt;', 1)]"/>
                 <filter name="f_rundumschlag" string="Mehrere Domains"

@@ -34,10 +34,11 @@ die Maske absichert, sichert den kleineren Teil.
 
 WARUM MIT SCHWELLE
 ------------------
-Von den neun gescheiterten Web-Anmeldungen waren acht Tippfehler
-eigener Mitarbeiter; einer hat sein Kennwort ins Benutzerfeld
-getippt. Eine Sperre beim ersten Fehlversuch haette also fast
-ausschliesslich Kollegen getroffen. Deshalb
+Von den neun gescheiterten Web-Anmeldungen kamen FUENF von Kunden,
+die sich den Zugang selbst auf einem weiteren Geraet einrichteten und
+dabei die falsche Domain eintrugen -- einmal die eigene, nur mit
+Bindestrich statt Punkt. Eine Sperre beim ersten Fehlversuch haette
+also nicht Angreifer getroffen, sondern Kunden bei der Einrichtung. Deshalb
 ``web_rbl.schwelle.anmeldung`` (Vorgabe 10, wie bei Odoo selbst):
 verbucht wird ab dem ersten, gesperrt ab dem zehnten.
 """
@@ -56,6 +57,31 @@ class ResUsers(models.Model):
     _inherit = "res.users"
 
     def _login(self, credential, user_agent_env):
+        # ANMELDUNG GANZ VERBIETEN, wenn die Adresse dafuer gesperrt ist.
+        #
+        # Die Pfadliste in ir_http haelt solche Adressen schon von der
+        # Anmeldemaske fern. Das ist billig und frueh, aber es haengt
+        # daran, dass die Liste vollstaendig ist -- und eine
+        # Pfadliste ist nie vollstaendig. Ein Modul, eine neue
+        # Odoo-Fassung, ein Fremdcontroller, und es gibt einen Weg,
+        # den niemand aufgeschrieben hat.
+        #
+        # Hier dagegen ist es einfach: Eine Anmeldung ist eine
+        # Anmeldung, egal welche Adresse sie aufgerufen hat. Alle Wege
+        # laufen durch diese Methode -- die Maske, XML-RPC, JSON-RPC.
+        #
+        # Das Kennwort wird dabei gar nicht erst geprueft. Wer nicht
+        # anklopfen darf, soll auch nicht erfahren, ob er das richtige
+        # Kennwort geraten hat.
+        try:
+            self._rbl_anmeldung_erlaubt()
+        except AccessDenied:
+            raise
+        except Exception:  # noqa: BLE001
+            # Ein Fehler in UNSERER Pruefung darf niemanden aussperren.
+            _logger.exception(
+                "Web RBL: Anmeldepruefung gescheitert, Anmeldung laeuft "
+                "unveraendert weiter.")
         try:
             return super()._login(credential, user_agent_env)
         except AccessDenied:
@@ -70,6 +96,76 @@ class ResUsers(models.Model):
                 _logger.exception(
                     "Web RBL: Fehlversuch konnte nicht verbucht werden.")
             raise
+
+    def _rbl_anmeldung_erlaubt(self):
+        """Darf sich von dieser Adresse ueberhaupt jemand anmelden?"""
+        if not request:
+            return
+        Parameter = self.env["ir.config_parameter"].sudo()
+        if Parameter.get_param("web_rbl.aktiv", "1") != "1":
+            return
+        Herkunft = self.env["web.rbl.herkunft"].sudo()
+        adresse = Herkunft.adresse()
+        if not adresse:
+            return
+        # Die Freiliste gewinnt auch hier. Wer bei uns als Kunde oder
+        # Gegenstelle gefuehrt wird, meldet sich an, Punkt.
+        if self.env["web.rbl.freiliste"].sudo().ist_frei(adresse):
+            return
+        grund = ""
+        stufe = self.env["web.rbl.fremdliste"].sudo().stufe_fuer(adresse)
+        if stufe in ("kein_backend", "sperren"):
+            grund = f"fremde Bedrohungsliste, Stufe {stufe}"
+
+        # AB WELCHER BEWERTUNG KEINE ANMELDUNG MEHR?
+        #
+        # Gemessen an allen 50 Eintraegen der Produktion am
+        # 25.09.2026:
+        #     ab 30: 18 Adressen, davon 0 freigegeben
+        #     ab 40:  6 Adressen, davon 0 freigegeben
+        #     ab 50:  1 Adresse
+        # Die drei freigegebenen Kundenadressen liegen bei 12, die
+        # Fehlkonfiguration bei 0. Ab 30 stehen dort ausschliesslich
+        # Rechenzentrums-Scanner mit .env-, .git- und
+        # Konfigurationssonden.
+        #
+        # Die Vorgabe ist trotzdem 40 und nicht 30, und zwar wegen
+        # eines Risikos, das in unseren Daten NICHT sichtbar ist:
+        # geteilte Adressen. Hinter einer Bueroadresse kann neben
+        # zwanzig Mitarbeitern ein befallener Rechner sitzen. Bei 30
+        # genuegt dessen einzelne .env-Sonde, um das ganze Buero von
+        # der Anmeldung auszuschliessen; bei 40 braucht es zwei
+        # verschiedene Muster oder Beharrlichkeit ueber Tage.
+        #
+        # 0 schaltet die Regel ab.
+        if not grund:
+            eintrag = self.env["web.rbl.eintrag"].sudo().search(
+                [("adresse", "=", adresse)], limit=1)
+            if eintrag:
+                # Eine Freigabe von Hand zaehlt mehr als jede Zahl.
+                # Wer sie erteilt hat, hatte einen Grund.
+                if eintrag.zustand == "frei":
+                    return
+                if eintrag.zustand == "hochrisiko":
+                    grund = "Koederanbiss"
+                else:
+                    try:
+                        schwelle = int(Parameter.get_param(
+                            "web_rbl.anmeldung_ab_bewertung", "40"))
+                    except (TypeError, ValueError):
+                        schwelle = 40
+                    if schwelle and (eintrag.bewertung or 0) >= schwelle:
+                        grund = (f"Bewertung {eintrag.bewertung} "
+                                 f"(Schwelle {schwelle}): "
+                                 f"{eintrag.bewertung_grund or ''}")
+
+        if grund:
+            _logger.info(
+                "Web RBL: Anmeldung von %s abgelehnt -- %s", adresse, grund)
+            # Dieselbe Meldung wie bei einem falschen Kennwort. Wer
+            # abgewiesen wird, soll nicht erfahren, WARUM -- sonst
+            # weiss er, dass er nur die Adresse wechseln muss.
+            raise AccessDenied()
 
     def _on_login_cooldown(self, failures, previous):
         """Wer trotz Abkühlung weiterklopft, liest die Meldung nicht.

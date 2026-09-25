@@ -38,8 +38,12 @@ TAGE_BIS_DAUERHAFT = 3
 # niemand versehentlich abschickt.
 #
 # Anders bei Anmeldungen: Von neun gescheiterten Anmeldungen in
-# siebzehn Tagen waren acht Tippfehler eigener Mitarbeiter. Die Zahl
-# 10 ist bewusst dieselbe wie Odoos ``base.login_cooldown_after``.
+# siebzehn Tagen kamen FUENF von Kunden, die sich den Zugang selbst
+# auf einem weiteren Geraet einrichteten und dabei die falsche Domain
+# eintrugen -- einmal die eigene, nur mit Bindestrich statt Punkt.
+# Eine Sperre beim ersten Fehlversuch trifft also Kunden bei der
+# Einrichtung, nicht Angreifer. Die Zahl 10 ist bewusst dieselbe wie
+# Odoos ``base.login_cooldown_after``.
 SCHWELLE_VORGABE = {
     "anmeldung": 10,
     "csrf": 10,
@@ -81,6 +85,15 @@ class WebRblEintrag(models.Model):
         string="Domains", default=0, readonly=True, index=True,
         help="Mehrere nicht zusammenhängende Domains derselben Adresse "
              "sind das Kennzeichen eines maschinellen Rundumschlags.")
+    bewertung = fields.Integer(
+        string="Bewertung", compute="_compute_bewertung", store=True,
+        help="0 bis 100. Wie sicher ist es, dass hinter dieser Adresse "
+             "ein Angreifer steht? Berechnet aus dem, was wir SELBST "
+             "gesehen haben -- kein fremder Dienst, keine Abfrage nach "
+             "aussen.")
+    bewertung_grund = fields.Char(
+        string="Warum diese Bewertung", compute="_compute_bewertung",
+        store=True)
     treffer_anzahl = fields.Integer(
         string="Trefferzahl", default=0, readonly=True)
     tage_auffaellig = fields.Integer(
@@ -113,6 +126,143 @@ class WebRblEintrag(models.Model):
     _adresse_eindeutig = models.Constraint(
         "unique(adresse)",
         "Zu jeder Adresse gibt es genau einen Eintrag.")
+
+    # ------------------------------------------------------------------
+    # Bewertung
+    # ------------------------------------------------------------------
+    # Gewicht je Muster. Nicht jeder Treffer wiegt gleich: Wer
+    # ``/.env`` abruft, sucht Zugangsdaten und weiss das. Wer einen
+    # alten ``.aspx``-Link folgt, tut es nicht.
+    #
+    # Die Zahlen sind keine Wissenschaft, sondern eine Ordnung -- und
+    # sie sind an dem ausgerichtet, was der Treffer ueber die ABSICHT
+    # aussagt, nicht ueber den Schaden.
+    GEWICHT = {
+        "koeder": 60,            # hat eine Faelschung gelesen und gehandelt
+        "traversal_ziel": 35,    # Verzeichniswechsel MIT lohnendem Ziel
+        "cloudschluessel": 35,   # Zugangsdaten zu fremden Systemen
+        "dotenv": 30,
+        "konfig": 30,
+        "vcs": 30,
+        "bauanweisung": 25,
+        "werkzeugkette": 25,     # /api/fs/exec ist ein Ausfuehrungsversuch
+        "odoo_dbverwalter": 30,  # weiss, dass hier Odoo laeuft
+        "anmeldung_bot": 40,     # hat die Wartemeldung ignoriert
+        "shell": 30,
+        "dbtool": 20,
+        "wordpress": 15,
+        "php": 12,
+        "cgi": 12,
+        "graphql": 12,
+        "scanner": 20,           # am Verhalten erkannt
+        "anmeldung": 10,
+        "csrf": 10,
+        "fremdliste": 10,        # fremdes Urteil, wiegt bewusst leicht
+        "traversal": 5,
+        "altendung": 3,
+        "pflichtseite": 5,
+        "maschinenseite": 0,
+        "odoo_fingerabdruck": 8,
+        "odoo_dbliste": 8,
+        # Fehlkonfigurationen sagen NICHTS ueber Absicht aus.
+        "qnap": 0, "autodiscover": 0, "activesync": 0,
+        "webdav": 0, "synology": 0, "pflichtseite_fehlt": 5,
+    }
+
+    @api.depends("treffer_ids.muster", "tage_auffaellig", "hosts_anzahl",
+                 "zustand")
+    def _compute_bewertung(self):
+        """Wie sicher ist es, dass hier ein Angreifer sitzt?
+
+        WARUM EINE EIGENE BEWERTUNG UND KEIN FREMDER DIENST
+        ----------------------------------------------------
+        Kaufbare Bewertungen beantworten die Frage "was wissen andere
+        ueber diese Adresse". Das ist nuetzlich, aber es ist nicht die
+        Frage, die hier zaehlt. Die lautet: **Was hat diese Adresse
+        BEI UNS getan?** Darauf kann nur unsere eigene Buchfuehrung
+        antworten, und sie tut es ohne eine einzige Abfrage nach
+        aussen -- also ohne dass jemand erfaehrt, wonach wir fragen.
+
+        VIER ANTEILE
+        1. Das schwerste Muster. Wer einmal ``/.env`` gesucht hat, hat
+           sich zu erkennen gegeben; dass er es fuenfzigmal tat, macht
+           ihn nicht boeser.
+        2. Beharrlichkeit ueber TAGE. Dreissig Sonden in zwei Sekunden
+           sind ein Vorfall. Wer am Montag, Mittwoch und Freitag
+           wiederkommt, sucht nicht mehr, sondern hat uns auf einer
+           Liste.
+        3. Mehrere Domains. Der Rundumschlag ueber nicht
+           zusammenhaengende Hosts ist ein eigener Befund.
+        4. Ein Koederanbiss. Der ist beweisend und hebt die Bewertung
+           allein ueber jede Schwelle.
+
+        Eine Fehlkonfiguration bekommt 0. Sie ist kein Angriff, und
+        eine Bewertung, die defekte Sync-Clients nach oben zieht,
+        waere genau die Art Zahl, der man nach einer Woche nicht mehr
+        glaubt.
+        """
+        for eintrag in self:
+            if eintrag.zustand == "fehlkonfiguration":
+                eintrag.bewertung = 0
+                eintrag.bewertung_grund = "Fehlkonfiguration, kein Angriff"
+                continue
+
+            muster = [m for m in eintrag.treffer_ids.mapped("muster") if m]
+            schwerstes = 0
+            name = ""
+            for m in set(muster):
+                g = eintrag.GEWICHT.get(m, 10)
+                if g > schwerstes:
+                    schwerstes, name = g, m
+
+            gruende = []
+            punkte = schwerstes
+            if name:
+                gruende.append(f"Muster {name} ({schwerstes})")
+
+            # MEHRERE VERSCHIEDENE ERNSTE MUSTER.
+            #
+            # Wer ``/.env`` sucht, kann ein Baukasten mit einer
+            # einzigen Regel sein. Wer ``/.env`` UND ``/.git/config``
+            # UND ``/credentials.json`` sucht, arbeitet eine Liste ab
+            # -- das ist eine andere Aussage, und sie faellt sonst
+            # unter den Tisch, weil nur das schwerste Muster zaehlt.
+            #
+            # Nur ernste Muster (Gewicht ab 20) zaehlen mit. Ein
+            # alter .aspx-Link neben einer .env-Sonde sagt nichts.
+            ernste = {m for m in set(muster)
+                      if eintrag.GEWICHT.get(m, 10) >= 20}
+            if len(ernste) > 1:
+                zuschlag = min(24, (len(ernste) - 1) * 8)
+                punkte += zuschlag
+                gruende.append(
+                    f"{len(ernste)} verschiedene ernste Muster (+{zuschlag})")
+
+            # Beharrlichkeit: je weiterem auffaelligen Tag 10, bis 30
+            tage = max(0, (eintrag.tage_auffaellig or 0) - 1)
+            if tage:
+                zuschlag = min(30, tage * 10)
+                punkte += zuschlag
+                gruende.append(f"{tage + 1} auffällige Tage (+{zuschlag})")
+
+            # Rundumschlag ueber mehrere Domains
+            if (eintrag.hosts_anzahl or 0) > 1:
+                zuschlag = min(15, (eintrag.hosts_anzahl - 1) * 5)
+                punkte += zuschlag
+                gruende.append(
+                    f"{eintrag.hosts_anzahl} Domains (+{zuschlag})")
+
+            # Menge zaehlt, aber schwach und gedeckelt
+            if (eintrag.treffer_anzahl or 0) > 20:
+                punkte += 10
+                gruende.append("über 20 Treffer (+10)")
+
+            if eintrag.zustand == "hochrisiko":
+                punkte = max(punkte, 95)
+                gruende.append("Köderanbiss — bewiesen, nicht vermutet")
+
+            eintrag.bewertung = max(0, min(100, punkte))
+            eintrag.bewertung_grund = ", ".join(gruende) or "keine Treffer"
 
     # ------------------------------------------------------------------
     # Ist gesperrt?
@@ -392,9 +542,11 @@ class WebRblEintrag(models.Model):
         # gegeben -- wer sich einmal vertippt, nicht.
         #
         # Gemessen ueber siebzehn Tage: neun gescheiterte Anmeldungen,
-        # davon acht Tippfehler eigener Mitarbeiter (einer hat sein
-        # Kennwort ins Benutzerfeld getippt). Eine Sperre beim ersten
-        # Fehlversuch haette also fast nur Kollegen getroffen.
+        # davon FUENF von Kunden, die sich den Zugang selbst auf einem
+        # weiteren Geraet einrichteten und die falsche Domain eintrugen
+        # -- einmal die eigene, nur mit Bindestrich statt Punkt. Eine
+        # Sperre beim ersten Fehlversuch trifft also Kunden bei der
+        # Einrichtung, nicht Angreifer.
         #
         #     web_rbl.schwelle.anmeldung = 10
         #

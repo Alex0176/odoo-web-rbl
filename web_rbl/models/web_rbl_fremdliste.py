@@ -69,11 +69,18 @@ class WebRblQuelle(models.Model):
     aktiv = fields.Boolean(string="Aktiv", default=True)
 
     stufe = fields.Selection(
-        [("sperren", "Sperren"),
+        [("sperren", "Ganz sperren"),
+         ("kein_backend", "Kein Zugang zur Anmeldung"),
          ("melden", "Nur melden"),
          ("zaehlen", "Nur zählen")],
         string="Stufe", default="melden", required=True,
-        help="Was geschieht, wenn eine Adresse auf dieser Liste steht? "
+        help="Was geschieht, wenn eine Adresse auf dieser Liste steht?\n\n"
+             "'Kein Zugang zur Anmeldung' ist der Mittelweg: Die "
+             "Webseite bleibt lesbar, die Anmeldemaske und die "
+             "Schnittstellen sind zu. Für Tor-Ausgangsknoten ist das "
+             "meist die richtige Antwort -- wer anonym lesen will, "
+             "soll das dürfen; wer anonym Kennwörter durchprobieren "
+             "will, nicht.\n\n"
              "Die Vorgabe ist 'melden': Wer eine fremde Liste scharf "
              "schaltet, übernimmt fremdes Urteil.")
 
@@ -208,8 +215,8 @@ class WebRblFremdliste(models.Model):
         ueber 25.000 Adressen mit -- und die Abfrage laeuft bei jeder
         Anfrage. Ein Durchlauf waere dort am falschen Platz.
         """
-        roh = {"sperren": {4: [], 6: []}, "melden": {4: [], 6: []},
-               "zaehlen": {4: [], 6: []}}
+        roh = {stufe: {4: [], 6: []} for stufe in
+               ("sperren", "kein_backend", "melden", "zaehlen")}
         self.env.cr.execute("""
             SELECT f.bereich, q.stufe
               FROM web_rbl_fremdliste f
@@ -257,7 +264,7 @@ class WebRblFremdliste(models.Model):
             return ""
         wert = int(geprueft)
         alle = self._bereiche()
-        for stufe in ("sperren", "melden", "zaehlen"):
+        for stufe in ("sperren", "kein_backend", "melden", "zaehlen"):
             bereiche = alle.get(stufe, {}).get(geprueft.version, ())
             if not bereiche:
                 continue

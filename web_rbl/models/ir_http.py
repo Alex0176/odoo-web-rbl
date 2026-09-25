@@ -376,6 +376,21 @@ class IrHttp(models.AbstractModel):
     # ------------------------------------------------------------------
     # Anmeldeversuche, die nie bei der Kennwortpruefung ankommen
     # ------------------------------------------------------------------
+    # WAS ALS "BACKEND" GILT.
+    #
+    # Bewusst eine Aufzaehlung und nicht "/web/": Unter /web/ liegen
+    # auch die Sitzungsdateien, Bilder und Stildateien, die JEDE
+    # oeffentliche Seite braucht. Wer /web/ pauschal sperrt, liefert
+    # eine Webseite ohne Bilder aus und wundert sich.
+    # Das PORTAL zaehlt mit dazu (/my/...). Dort sieht ein Kunde
+    # seine Auftraege, Rechnungen und Tickets -- eine Anmeldung dort
+    # ist dasselbe Risiko wie eine im Backend, nur mit anderer Maske.
+    BACKENDWEGE = re.compile(
+        r"^/(odoo|my|web/login|web/session|web/signup|web/reset_password|"
+        r"web/database|web/dataset|web/webclient|xmlrpc|jsonrpc|"
+        r"web/become|web/health)(/|$|\?|#)"
+        r"|^/web/?$|^/web[#?]", re.I)
+
     ANMELDEWEGE = re.compile(
         r"^/(web/login|web/session/authenticate|web/signup|"
         r"web/reset_password|xmlrpc)", re.I)
@@ -525,7 +540,23 @@ class IrHttp(models.AbstractModel):
         if not muster:
             fremd = request.env["web.rbl.fremdliste"].sudo().stufe_fuer(
                 adresse)
-            if fremd:
+            if fremd == "kein_backend":
+                # DER MITTELWEG: lesen ja, anmelden nein.
+                #
+                # Fuer Tor-Ausgangsknoten ist das meist die richtige
+                # Antwort. Wer anonym lesen will, soll das duerfen --
+                # das ist ein berechtigtes Anliegen und in manchen
+                # Laendern die einzige Art, eine Seite ueberhaupt zu
+                # erreichen. Wer anonym Kennwoerter durchprobieren
+                # will, nicht.
+                #
+                # Eine Ganzsperre waere hier zu grob und eine blosse
+                # Meldung zu wenig.
+                if cls.BACKENDWEGE.search(path_info or ""):
+                    muster, stufe = "fremdliste", SPERREN
+                else:
+                    muster, stufe = "fremdliste", MELDEN
+            elif fremd:
                 muster, stufe = "fremdliste", fremd
 
         if freigestellt and stufe == SPERREN:

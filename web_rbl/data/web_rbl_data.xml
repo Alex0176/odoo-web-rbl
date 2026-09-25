@@ -52,9 +52,11 @@
             naechsten Neustart, hier bleibt er stehen.
 
             Warum ueberhaupt eine Schwelle: Von neun gescheiterten
-            Anmeldungen in siebzehn Tagen waren acht Tippfehler eigener
-            Mitarbeiter. Eine Sperre beim ersten Fehlversuch haette
-            fast nur Kollegen getroffen.
+            Anmeldungen in siebzehn Tagen kamen FUENF von Kunden, die
+            sich den Zugang selbst auf einem weiteren Geraet
+            einrichteten und die falsche Domain eintrugen. Eine Sperre
+            beim ersten Fehlversuch trifft Kunden bei der Einrichtung,
+            nicht Angreifer.
         -->
         <record id="param_anmeldung_aktiv" model="ir.config_parameter">
             <field name="key">web_rbl.anmeldung_aktiv</field>
@@ -67,6 +69,19 @@
         <record id="param_schwelle_anmeldung" model="ir.config_parameter">
             <field name="key">web_rbl.schwelle.anmeldung</field>
             <field name="value">10</field>
+        </record>
+        <!--
+            Ab welcher Bewertung darf sich von einer Adresse niemand
+            mehr anmelden? 0 schaltet es ab.
+
+            40 statt 30 wegen eines Risikos, das in Messdaten nicht
+            sichtbar wird: geteilte Adressen. Hinter einer
+            Bueroadresse kann neben zwanzig Mitarbeitern ein
+            befallener Rechner sitzen.
+        -->
+        <record id="param_anmeldung_ab_bewertung" model="ir.config_parameter">
+            <field name="key">web_rbl.anmeldung_ab_bewertung</field>
+            <field name="value">40</field>
         </record>
         <record id="param_muster_anmeldung_bot" model="ir.config_parameter">
             <field name="key">web_rbl.muster.anmeldung_bot</field>
