@@ -68,8 +68,37 @@ MUSTER = (
         r"(^|/)\.(git|svn|hg)(/|$)", re.I)),
     ("wordpress", SPERREN, re.compile(
         r"(^|/)(wp-admin|wp-includes|wp-content|wp-login|xmlrpc\.php)", re.I)),
+    # ``.cgi`` steht hier BEWUSST NICHT MEHR.
+    #
+    # Gemessen am 25.09.2026 ueber siebzehn Tage Echtverkehr:
+    #     603  /cgi-bin/filemanager/qsyncPrepare.cgi
+    #     578  /cgi-bin/qsync/qsyncsrvPrepare.cgi
+    #     186  /cgi-bin/authLogin.cgi
+    #       8  echte Sonden (webmin, dana-na)
+    #
+    # Die ersten drei sind die Web-API eines QNAP-NAS: Qsync-Client und
+    # Anmeldung. Sie kamen von oesterreichischen Kundenadressen und aus
+    # unserem eigenen Netz -- eine Adresse allein 962 mal. Ein
+    # Sync-Client, dessen Ziel nicht mehr stimmt, klopft eben weiter.
+    #
+    # 1367 legitime Anfragen gegen acht echte Sonden: ``.cgi`` ist kein
+    # Angriffsmerkmal, sondern ein Fehlalarmgenerator. Es hat am
+    # 24.09.2026 einen Kunden gesperrt.
     ("php", SPERREN, re.compile(
-        r"\.(php[0-9]?|phtml|asp|aspx|jsp|cgi)($|\?)", re.I)),
+        r"\.(php[0-9]?|phtml)($|\?)", re.I)),
+    # ``.asp``, ``.aspx`` und ``.jsp`` sperren NICHT, sie zaehlen nur.
+    #
+    # Gemessen ueber siebzehn Tage: 48 Anfragen sehen nach alten Links
+    # auf unsere EIGENEN Seiten aus (22x /SiteMap.aspx, 20x
+    # /impressum.asp, 6x /index.aspx -- Reste einer frueheren
+    # ASP-Fassung), gegen 25, die nach Sonden aussehen. Bei ``.php``
+    # steht es 14.012 zu einer Handvoll; dort traegt die Endung, hier
+    # nicht.
+    #
+    # Eine Sperre allein wegen einer Dateiendung trifft bei alten Links
+    # auf die eigenen Seiten immer wieder Unbeteiligte.
+    ("altendung", ZAEHLEN, re.compile(
+        r"\.(asp|aspx|jsp|jspa)($|\?)", re.I)),
     ("dbtool", SPERREN, re.compile(
         r"(^|/)(phpmyadmin|pma|adminer|mysqladmin)(/|$)", re.I)),
     ("shell", SPERREN, re.compile(
@@ -189,6 +218,20 @@ class IrHttp(models.AbstractModel):
         #    Punkt 1 bereits erledigt.
         return None
 
+    # Seiten, die es auf einer Firmenwebseite geben MUSS und die
+    # Pruefdienste in allen Schreibweisen durchprobieren. Gemessen am
+    # 25.09.2026: 92.205.178.32 rief /impressum, /Impressum,
+    # /impressum/, /impressum.php, /impressum.html, /impressum.htm und
+    # /impressum.asp ab -- offensichtlich ein Impressumspruefer, wie ihn
+    # Rechtsdienste einsetzen. Gesperrt hat ihn ausgerechnet die
+    # ``.php``-Variante.
+    #
+    # Wer das Impressum sucht, greift nicht an. Diese Namen sind
+    # deshalb von jedem Muster ausgenommen.
+    PFLICHTSEITEN = re.compile(
+        r"/(impressum|imprint|kontakt|contact|datenschutz|privacy|"
+        r"agb|terms|sitemap|robots)([./]|$)", re.I)
+
     @classmethod
     def _rbl_muster(cls, pfad, Parameter=None):
         """(Name, Stufe) des ersten zutreffenden Musters, sonst ("", "").
@@ -205,6 +248,8 @@ class IrHttp(models.AbstractModel):
             web_rbl.muster.php        = zaehlen
         """
         pfad = pfad or ""
+        if cls.PFLICHTSEITEN.search(pfad):
+            return "", ""
         for name, vorgabe, regel in MUSTER:
             if not regel.search(pfad):
                 continue
