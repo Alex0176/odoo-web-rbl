@@ -118,6 +118,33 @@ class WebRblEintrag(models.Model):
         kennung = False
         try:
             with self.pool.cursor() as cr:
+                # READ COMMITTED, sonst wirkt das ``ON CONFLICT`` unten
+                # nicht: Odoo oeffnet jede Transaktion mit REPEATABLE
+                # READ, und dort wirft PostgreSQL, statt zu schlucken.
+                cr.execute("SET TRANSACTION ISOLATION LEVEL READ COMMITTED")
+                # DEN EINTRAG WETTLAUFFREI SICHERSTELLEN.
+                #
+                # In der Nacht auf den 25.09.2026 sind so 77 Treffer
+                # verlorengegangen: Zwei Arbeitsprozesse bearbeiten
+                # gleichzeitig Sonden DERSELBEN Adresse, beide finden
+                # keinen Eintrag, beide legen an -- einer laeuft in die
+                # Eindeutigkeitsverletzung. Betroffen waren ausgerechnet
+                # die aktivsten Angreifer, weil nur dort mehrere
+                # Anfragen zeitgleich eintreffen.
+                #
+                # ``ON CONFLICT DO NOTHING`` legt an, wenn noetig, und
+                # schweigt, wenn ein anderer schneller war. Danach ist
+                # der Eintrag in jedem Fall vorhanden.
+                cr.execute("""
+                    INSERT INTO web_rbl_eintrag
+                        (adresse, zustand, erstmals, treffer_anzahl,
+                         tage_auffaellig, create_uid, create_date,
+                         write_uid, write_date)
+                    VALUES (%s, 'beobachtet', now() AT TIME ZONE 'UTC', 0, 0,
+                            %s, now() AT TIME ZONE 'UTC',
+                            %s, now() AT TIME ZONE 'UTC')
+                    ON CONFLICT (adresse) DO NOTHING
+                """, (adresse, SUPERUSER_ID, SUPERUSER_ID))
                 eigene = api.Environment(cr, SUPERUSER_ID, {})
                 eintrag = eigene["web.rbl.eintrag"].treffer_buchen(
                     adresse, pfad, muster)
@@ -178,11 +205,27 @@ class WebRblEintrag(models.Model):
                 "zustand": "beobachtet",
             })
 
-        eintrag.sudo().write({
-            "treffer_anzahl": eintrag.treffer_anzahl + 1,
-            "zuletzt": jetzt,
-            "letzter_pfad": (pfad or "")[:255],
-        })
+        # ATOMAR ZAEHLEN, NICHT LESEN-ADDIEREN-SCHREIBEN.
+        #
+        # ``treffer_anzahl = eintrag.treffer_anzahl + 1`` ueber den ORM
+        # ist ein Lost Update: Zwei gleichzeitige Treffer lesen beide
+        # denselben Stand und schreiben beide denselben neuen Wert --
+        # einer geht verloren. Im Test mit zehn gleichzeitigen Sonden
+        # zaehlte der Stand 11 statt 20.
+        #
+        # Die genaue Zahl steht ohnehin in ``treffer_ids``; dieses Feld
+        # ist die schnelle Anzeige. Aber eine Anzeige, die bei jedem
+        # Ansturm falsch wird, taugt nichts -- und ausgerechnet beim
+        # Ansturm schaut man hin.
+        eintrag.env.cr.execute("""
+            UPDATE web_rbl_eintrag
+               SET treffer_anzahl = treffer_anzahl + 1,
+                   zuletzt        = %s,
+                   letzter_pfad   = %s
+             WHERE id = %s
+        """, (jetzt, (pfad or "")[:255], eintrag.id))
+        eintrag.invalidate_recordset(
+            ["treffer_anzahl", "zuletzt", "letzter_pfad"])
         self.env["web.rbl.treffer"].sudo().create({
             "eintrag_id": eintrag.id,
             "pfad": (pfad or "")[:255],
