@@ -107,9 +107,38 @@ class IrHttp(models.AbstractModel):
     # ------------------------------------------------------------------
     @classmethod
     def _rbl_verhalten_merken(cls, ist_fehler):
-        """Einen Ausgang vermerken und bei Bedarf melden."""
+        """Einen Ausgang vermerken und bei Bedarf melden.
+
+        JE ANFRAGE GENAU EINMAL.
+        ------------------------
+        ``_serve_fallback`` wird fuer DIESELBE Anfrage mehrfach
+        gerufen -- Odoos Wegfindung probiert Sprachpraefixe und
+        Rueckfallpfade durch. Ohne Markierung zaehlt jeder Fehlschlag
+        doppelt, und die Schwelle von zwanzig wirkt wie zehn.
+
+        Gemessen am 25.09.2026 auf der Testinstanz: Eine Adresse mit
+        25 erfundenen Pfaden wurde bereits nach der ZEHNTEN Anfrage
+        gesperrt.
+
+        Das ist besonders schlecht, weil die Schwelle nicht geraten,
+        sondern an echten Daten gemessen ist: Bei zwanzig traf die
+        Regel 135 Adressen, davon sieben mit echtem Verkehr. Bei zehn
+        ist es eine andere Regel, die niemand gemessen hat -- und der
+        einzige Zweck der Messung war, genau das zu vermeiden.
+
+        Dieselbe Falle gab es am selben Tag schon einmal in
+        ``_match``; die Markierung dort heisst ``web_rbl.gebucht``.
+        Eine Lehre, die nur an der Stelle gilt, an der man sie gelernt
+        hat, ist keine.
+        """
         if not request or not request.env:
             return
+        umgebung = getattr(
+            getattr(request, "httprequest", None), "environ", None)
+        if isinstance(umgebung, dict):
+            if umgebung.get("web_rbl.verhalten"):
+                return
+            umgebung["web_rbl.verhalten"] = True
         Parameter = request.env["ir.config_parameter"].sudo()
         if Parameter.get_param("web_rbl.aktiv", "1") != "1":
             return
@@ -174,6 +203,27 @@ class IrHttp(models.AbstractModel):
             stufe = Parameter.get_param(f"web_rbl.muster.{MUSTER}", "sperren")
             if stufe not in ("sperren", "zaehlen", "melden"):
                 stufe = "sperren"
+
+            # DIE FREILISTE GILT AUCH HIER.
+            #
+            # Im Anfrageweg wird sie in ``_rbl_pruefen`` geprueft --
+            # dieser Weg laeuft aber daran vorbei, und das ist beim
+            # Testen aufgefallen: Eine Adresse VON der Freiliste bekam
+            # einen Eintrag mit Zustand "gesperrt". Die Sperre wirkte
+            # zwar nicht, weil ``_match`` sie freistellt, aber der
+            # Eintrag war falsch -- und ein Ticketlauf oder eine
+            # Auswertung haette sie als gesperrt gefuehrt.
+            #
+            # Die Schranke beim Aufnehmen in die Freiliste hilft hier
+            # nicht: Sie loest BESTEHENDE Sperren, und diese entsteht
+            # erst danach.
+            #
+            # Verbucht wird trotzdem, nur als Meldung: Dass eine
+            # Gegenstelle ploetzlich zwanzig Pfade durchprobiert, will
+            # man wissen. Es kann ein uebernommener Anschluss sein
+            # oder ein Geraet dahinter, das jemand gekapert hat.
+            if request.env["web.rbl.freiliste"].sudo().ist_frei(adresse):
+                stufe = "melden"
             try:
                 pfad = request.httprequest.path or ""
                 host = (request.httprequest.host or "")[:120]

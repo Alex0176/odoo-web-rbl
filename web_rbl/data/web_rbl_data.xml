@@ -106,9 +106,16 @@
             <field name="key">web_rbl.scanner_erfolge</field>
             <field name="value">2</field>
         </record>
+        <!--
+            Die Verhaltenserkennung wird MELDEND ausgeliefert, nicht
+            sperrend. Sie ist die einzige Regel, die ohne ein bekanntes
+            Muster auskommt, und damit die einzige, deren Fehlalarme
+            man nicht vorhersehen kann. Erst ein paar Tage ansehen,
+            wer darauf faellt, dann scharf schalten.
+        -->
         <record id="param_muster_scanner" model="ir.config_parameter">
             <field name="key">web_rbl.muster.scanner</field>
-            <field name="value">sperren</field>
+            <field name="value">melden</field>
         </record>
 
         <record id="param_aufbewahrung" model="ir.config_parameter">
