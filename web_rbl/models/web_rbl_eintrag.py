@@ -77,6 +77,17 @@ class WebRblEintrag(models.Model):
         help="Leer bei dauerhafter Sperre oder Freigabe.")
     letzter_pfad = fields.Char(string="Letzter Pfad", readonly=True)
     notiz = fields.Text(string="Notiz")
+    # Ein Verweis von Hand statt eines Many2one: Das Modul soll auch
+    # dort laufen, wo es gar kein Ticketmodell gibt. Ein Many2one auf
+    # ein nicht installiertes Modell macht das Modul uninstallierbar.
+    ticket_modell = fields.Char(string="Ticketmodell", readonly=True)
+    ticket_id = fields.Integer(string="Ticket", readonly=True, index=True)
+    ticket_nummer = fields.Char(string="Ticketnummer", readonly=True)
+    ticket_gemeldet_am = fields.Datetime(
+        string="Zuletzt gemeldet", readonly=True,
+        help="Bis zu diesem Zeitpunkt sind die Treffer im Ticket "
+             "vermerkt. Was danach kommt, öffnet ein geschlossenes "
+             "Ticket wieder.")
     treffer_ids = fields.One2many(
         "web.rbl.treffer", "eintrag_id", string="Einzeltreffer")
     koeder_ids = fields.One2many(
@@ -455,6 +466,298 @@ class WebRblEintrag(models.Model):
             _logger.info(
                 "Web RBL: %s Sperre(n) abgelaufen.", len(abgelaufen))
         return True
+
+    # ------------------------------------------------------------------
+    # Aus einem Befund ein Ticket machen
+    # ------------------------------------------------------------------
+    @api.model
+    def _cron_befunde_melden(self):
+        """Je Adresse HÖCHSTENS EIN Ticket für eine Fehlkonfiguration.
+
+        WARUM ALS CRON UND NICHT BEIM TREFFER
+        --------------------------------------
+        Ein Qsync-Client, dessen Ziel nicht stimmt, klopft im
+        Minutentakt -- eine Adresse allein 968 mal in siebzehn Tagen.
+        Ein Ticket im Anfrageweg anzulegen hiesse, für jede dieser
+        Anfragen eine Datenbankverbindung, eine Nummernfolge und einen
+        Nachrichtenkanal zu bezahlen. Am 25.09.2026 hat schon eine
+        zusätzliche Verbindung je Sonde den Verbindungspool erschöpft.
+
+        Hier nicht: Der Cron sieht einmal am Tag nach, was es Neues
+        gibt, und legt in Ruhe an.
+
+        WARUM ES KEIN MANY2ONE IST
+        ---------------------------
+        Das Modul ist öffentlich und soll ohne Ticketsystem laufen.
+        Ein ``Many2one`` auf ein nicht installiertes Modell liesse es
+        sich nicht einmal installieren. Also Modellname und Kennung von
+        Hand -- und jeder Zugriff darauf geprüft.
+
+        ABGESCHALTET AUSGELIEFERT. Einschalten je Muster::
+
+            web_rbl.ticket.qnap         = 1
+            web_rbl.ticket.autodiscover = 1
+            web_rbl.ticket_modell       = helpdesk.ticket   (Vorgabe)
+        """
+        Parameter = self.env["ir.config_parameter"].sudo()
+        modellname = Parameter.get_param(
+            "web_rbl.ticket_modell", "helpdesk.ticket")
+        if modellname not in self.env:
+            # Kein Ticketsystem installiert -- das ist kein Fehler.
+            return True
+
+        offen = self.sudo().search([
+            ("zustand", "in", ("fehlkonfiguration", "sammler")),
+        ])
+        angelegt = geoeffnet = 0
+        for eintrag in offen:
+            muster = eintrag._haupt_muster()
+            if not muster:
+                continue
+            if Parameter.get_param(f"web_rbl.ticket.{muster}", "0") != "1":
+                continue
+            try:
+                if eintrag.ticket_id:
+                    geoeffnet += bool(eintrag._ticket_wiederoeffnen())
+                else:
+                    eintrag._ticket_anlegen(modellname)
+                    angelegt += 1
+            except Exception:  # noqa: BLE001
+                # Ein misslungenes Ticket darf den Lauf nicht
+                # abbrechen: Die naechste Adresse soll trotzdem ihres
+                # bekommen. Beim naechsten Lauf wird es erneut
+                # versucht.
+                _logger.exception(
+                    "Web RBL: Ticket fuer %s nicht bearbeitet.",
+                    eintrag.adresse)
+        if angelegt or geoeffnet:
+            _logger.info(
+                "Web RBL: %s Ticket(s) angelegt, %s wieder geoeffnet.",
+                angelegt, geoeffnet)
+        return True
+
+    def _ticket_wiederoeffnen(self):
+        """Ein geschlossenes Ticket bei einem neuen Fall wieder öffnen.
+
+        WARUM NICHT EIN ZWEITES TICKET
+        -------------------------------
+        Eine Adresse, deren Sync-Client falsch zeigt, hört nicht auf zu
+        klopfen, nur weil jemand das Ticket geschlossen hat. Für jeden
+        Rückfall ein neues Ticket anzulegen hiesse, dieselbe Sache
+        mehrfach zu führen -- und die Vorgeschichte, die beim Anruf am
+        meisten hilft, läge über mehrere Tickets verstreut.
+
+        Also: dasselbe Ticket, eine neue Notiz, wieder offen. Wer es
+        geschlossen hat, sieht beim Wiederaufmachen sofort, was seither
+        passiert ist.
+
+        WANN NICHT
+        ----------
+        Nur, wenn seit der letzten Meldung tatsächlich etwas
+        dazugekommen ist. Ein geschlossenes Ticket zu einer Adresse,
+        die seither Ruhe gibt, bleibt geschlossen -- sonst ginge es bei
+        jedem Cronlauf wieder auf.
+        """
+        self.ensure_one()
+        if not self.ticket_id or not self.ticket_modell:
+            return False
+        if self.ticket_modell not in self.env:
+            return False
+        ticket = self.env[self.ticket_modell].sudo().browse(
+            self.ticket_id).exists()
+        if not ticket:
+            # Jemand hat das Ticket geloescht. Dann ist der Verweis
+            # wertlos; beim naechsten Lauf entsteht ein neues.
+            self.write({"ticket_id": 0, "ticket_modell": False,
+                        "ticket_nummer": False})
+            return False
+
+        # Gibt es ueberhaupt Neues?
+        if self.ticket_gemeldet_am and self.zuletzt and \
+                self.zuletzt <= self.ticket_gemeldet_am:
+            return False
+
+        stufe = getattr(ticket, "stage_id", False)
+        geschlossen = bool(stufe) and getattr(stufe, "closed", False)
+        if not geschlossen:
+            # Offen: nur den Stand nachfuehren, keine Notiz. Wer das
+            # Ticket gerade bearbeitet, braucht keine taegliche
+            # Wiederholung derselben Meldung.
+            self.write({"ticket_gemeldet_am": self.zuletzt})
+            return False
+
+        neue = self.treffer_ids.filtered(
+            lambda t: not self.ticket_gemeldet_am
+            or t.create_date > self.ticket_gemeldet_am)
+        offene_stufe = self._offene_stufe(ticket)
+
+        text = (
+            f"<p><b>Der Befund ist wieder aufgetreten.</b></p>"
+            f"<ul>"
+            f"<li><b>Adresse:</b> {self.adresse}</li>"
+            f"<li><b>Neue Anfragen seit der letzten Meldung:</b> "
+            f"{len(neue)}</li>"
+            f"<li><b>Zuletzt:</b> {self.zuletzt or ''}</li>"
+            f"<li><b>Angesprochene Domains:</b> "
+            f"{self.hosts or '(nicht erfasst)'}</li>"
+            f"</ul>"
+            f"<p>Das Ticket wurde deshalb wieder geöffnet. Die Ursache "
+            f"liegt beim Anschlussinhaber und ist offenbar noch nicht "
+            f"abgestellt.</p>"
+        )
+
+        # OHNE MAILVORLAGE UMSTUFEN.
+        #
+        # helpdesk_mgmt haengt an der Stufenaenderung eine Mailvorlage
+        # (_track_template, helpdesk_ticket.py:322) und setzt dabei
+        # ausdruecklich composition_mode "mass_mail", damit sie in
+        # jedem Fall hinausgeht. Fuer eine interne Arbeitsnotiz waere
+        # das falsch -- ``tracking_disable`` verhindert die
+        # Nachverfolgung und damit die Vorlage.
+        if offene_stufe:
+            ticket.with_context(tracking_disable=True).write(
+                {"stage_id": offene_stufe.id})
+        # Die Notiz danach und von Hand: als internes Protokoll, nicht
+        # als Nachricht an Abonnenten.
+        ticket.message_post(body=text, subtype_xmlid="mail.mt_note")
+        self.write({"ticket_gemeldet_am": self.zuletzt})
+        _logger.info(
+            "Web RBL: Ticket %s zu %s wieder geoeffnet (%s neue Treffer).",
+            ticket.id, self.adresse, len(neue))
+        return True
+
+    @api.model
+    def _offene_stufe(self, ticket):
+        """Die Stufe, in die ein wiedereröffnetes Ticket gehört."""
+        Parameter = self.env["ir.config_parameter"].sudo()
+        gesetzt = Parameter.get_param("web_rbl.ticket_stufe_offen_id")
+        Stufe = ticket.stage_id._name if getattr(
+            ticket, "stage_id", False) else None
+        if not Stufe:
+            return None
+        Stufen = self.env[Stufe].sudo()
+        if gesetzt:
+            try:
+                kandidat = Stufen.browse(int(gesetzt)).exists()
+                if kandidat:
+                    return kandidat
+            except (TypeError, ValueError):
+                pass
+        return Stufen.search(
+            [("closed", "=", False)], order="sequence", limit=1) or None
+
+    def _haupt_muster(self):
+        """Das Muster, das diesen Eintrag am häufigsten ausgelöst hat."""
+        self.ensure_one()
+        zaehler = {}
+        for treffer in self.treffer_ids:
+            if treffer.muster:
+                zaehler[treffer.muster] = zaehler.get(treffer.muster, 0) + 1
+        if not zaehler:
+            return ""
+        return max(zaehler, key=zaehler.get)
+
+    def _ticket_anlegen(self, modellname):
+        self.ensure_one()
+        Parameter = self.env["ir.config_parameter"].sudo()
+        Ticket = self.env[modellname].sudo()
+
+        # JE ADRESSE EINES -- AUCH ueBER DEN EINTRAG HINWEG.
+        #
+        # ``ticket_id`` allein genuegt nicht: Wird ein Eintrag
+        # entfernt (etwa beim Aufraeumen) und die Adresse faellt
+        # danach erneut auf, entstuende ein zweites Ticket zur selben
+        # Sache. Deshalb vorher nachsehen, ob es schon eines gibt --
+        # und sich daran haengen statt ein neues anzulegen.
+        vorhanden = Ticket.search(
+            [("name", "=like", f"Fehlkonfiguration {self.adresse}:%")],
+            order="id desc", limit=1)
+        if vorhanden:
+            self.write({
+                "ticket_modell": modellname,
+                "ticket_id": vorhanden.id,
+                "ticket_nummer": (
+                    getattr(vorhanden, "number", False)
+                    or vorhanden.display_name or str(vorhanden.id)),
+            })
+            # Kein ``ticket_gemeldet_am``: Das uebernimmt gleich das
+            # Wiederoeffnen, das dann auch die Notiz schreibt.
+            self._ticket_wiederoeffnen()
+            return vorhanden
+
+        domains = self.hosts or "(nicht erfasst)"
+        pfade = []
+        for treffer in self.treffer_ids[:8]:
+            pfade.append(f"<li><code>{treffer.pfad or ''}</code>"
+                         f"{' &mdash; ' + treffer.host if treffer.host else ''}"
+                         f"</li>")
+        beschreibung = (
+            f"<p>{self.befund or ''}</p>"
+            f"<ul>"
+            f"<li><b>Adresse:</b> {self.adresse}</li>"
+            f"<li><b>Angesprochene Domains:</b> {domains}</li>"
+            f"<li><b>Anfragen bisher:</b> {self.treffer_anzahl}</li>"
+            f"<li><b>Erstmals:</b> {self.erstmals or ''}</li>"
+            f"<li><b>Zuletzt:</b> {self.zuletzt or ''}</li>"
+            f"</ul>"
+            f"<p><b>Zuletzt gesehene Pfade:</b></p><ul>{''.join(pfade)}</ul>"
+            f"<p>Diese Adresse ist <b>nicht</b> gesperrt und wird es durch "
+            f"diesen Befund auch nicht. Das Ticket ist eine Erinnerung, "
+            f"die Ursache beim Anschlussinhaber abzustellen.</p>"
+        )
+        werte = {
+            "name": f"Fehlkonfiguration {self.adresse}: "
+                    f"{self._haupt_muster()}",
+            "description": beschreibung,
+        }
+        for feld, schluessel in (("team_id", "web_rbl.ticket_team_id"),
+                                 ("category_id", "web_rbl.ticket_kategorie_id"),
+                                 ("user_id", "web_rbl.ticket_bearbeiter_id")):
+            wert = Parameter.get_param(schluessel)
+            if wert and feld in Ticket._fields:
+                try:
+                    werte[feld] = int(wert)
+                except (TypeError, ValueError):
+                    pass
+
+        # OHNE BENACHRICHTIGUNG ANLEGEN.
+        #
+        # Ein Ticket, das beim Anlegen Post verschickt, waere hier
+        # genau falsch: Es gibt keinen Kunden, der etwas davon hat,
+        # und der Befund ist eine INTERNE Arbeitsnotiz. Kein
+        # partner_id, keine Abonnenten, kein Protokolleintrag.
+        ticket = Ticket.with_context(
+            mail_create_nosubscribe=True,
+            mail_create_nolog=True,
+            mail_notrack=True,
+            tracking_disable=True,
+        ).create(werte)
+        self.write({
+            "ticket_modell": modellname,
+            "ticket_id": ticket.id,
+            "ticket_nummer": (
+                getattr(ticket, "number", False)
+                or getattr(ticket, "display_name", False) or str(ticket.id)),
+            "ticket_gemeldet_am": self.zuletzt,
+        })
+        _logger.info("Web RBL: Ticket %s zu Befund %s angelegt.",
+                     ticket.id, self.adresse)
+        return ticket
+
+    def action_ticket_oeffnen(self):
+        self.ensure_one()
+        if not self.ticket_id or not self.ticket_modell:
+            raise UserError(_("Zu diesem Eintrag gibt es kein Ticket."))
+        if self.ticket_modell not in self.env:
+            raise UserError(_(
+                "Das Ticketmodell %s ist hier nicht installiert.",
+                self.ticket_modell))
+        return {
+            "type": "ir.actions.act_window",
+            "res_model": self.ticket_modell,
+            "res_id": self.ticket_id,
+            "view_mode": "form",
+        }
 
     @api.model
     def _cron_alte_treffer_loeschen(self):

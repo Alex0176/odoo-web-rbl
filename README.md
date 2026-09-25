@@ -190,6 +190,38 @@ Das Modul unterscheidet deshalb:
   auffälligen Adressen waren Suchmaschinen-Crawler, die einem alten
   Link auf `/SiteMap.aspx` folgten.
 
+## Aus einem Befund ein Ticket
+
+Ein Befund nützt nur, wenn ihn jemand abarbeitet. Je Muster lässt sich
+deshalb einschalten, dass daraus ein Ticket entsteht:
+
+```
+web_rbl.ticket.qnap         = 1
+web_rbl.ticket.autodiscover = 1
+web_rbl.ticket_modell       = helpdesk.ticket   (Vorgabe)
+web_rbl.ticket_team_id      = <optional>
+web_rbl.ticket_stufe_offen_id = <optional>
+```
+
+**Je Adresse höchstens eines.** Ein Sync-Client mit falschem Ziel klopft
+im Minutentakt — eine Adresse allein 968 mal in siebzehn Tagen. Wird
+das Ticket geschlossen und die Adresse fällt erneut auf, entsteht
+**kein zweites**: Das vorhandene wird wieder geöffnet und bekommt eine
+interne Notiz mit den neuen Anfragen. Gibt die Adresse Ruhe, bleibt das
+Ticket geschlossen.
+
+Angelegt wird per Cron, nicht im Anfrageweg: Ein Ticket je Sonde wäre
+eine Datenbankverbindung je Sonde, und genau daran ist die Sperrliste
+am 25.09.2026 schon einmal erstickt.
+
+Das Ticket ist eine **interne** Notiz — kein `partner_id`, keine
+Abonnenten, keine Mailvorlage beim Umstufen (`helpdesk_mgmt` hängt eine
+an die Stufenänderung und setzt dabei ausdrücklich `mass_mail`;
+`tracking_disable` verhindert das). Abgeschaltet ausgeliefert. Ohne
+installiertes Ticketmodell passiert nichts — es gibt bewusst kein
+`Many2one`, damit das Modul auch ohne Ticketsystem installierbar
+bleibt.
+
 Jeder Treffer hält außerdem fest, **welche Domain** angesprochen wurde.
 Das Zugriffsprotokoll von werkzeug enthält den Host nicht; er ist nur
 zur Laufzeit zu bekommen. Mehrere nicht zusammenhängende Domains

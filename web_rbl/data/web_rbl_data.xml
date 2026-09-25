@@ -46,6 +46,43 @@
             <field name="value">30</field>
         </record>
 
+        <!--
+            Aus einem Befund ein Ticket machen: ABGESCHALTET
+            ausgeliefert, und zwar je Muster einzeln.
+
+            Ein Ticket ist Arbeit für einen Menschen. Ob eine
+            Fehlkonfiguration diese Arbeit wert ist, hängt davon ab,
+            wen sie betrifft: Bei einem Kunden mit Wartungsvertrag
+            lohnt der Anruf, bei einer fremden Adresse aus dem Netz
+            nicht. Deshalb keine Vorgabe, sondern eine Entscheidung.
+
+            Einschalten je Muster:
+                web_rbl.ticket.qnap         = 1
+                web_rbl.ticket.autodiscover = 1
+        -->
+        <record id="param_ticket_modell" model="ir.config_parameter">
+            <field name="key">web_rbl.ticket_modell</field>
+            <field name="value">helpdesk.ticket</field>
+        </record>
+        <record id="param_ticket_qnap" model="ir.config_parameter">
+            <field name="key">web_rbl.ticket.qnap</field>
+            <field name="value">0</field>
+        </record>
+        <record id="param_ticket_autodiscover" model="ir.config_parameter">
+            <field name="key">web_rbl.ticket.autodiscover</field>
+            <field name="value">0</field>
+        </record>
+
+        <record id="cron_befunde_melden" model="ir.cron">
+            <field name="name">Web RBL: Befunde als Ticket melden</field>
+            <field name="model_id" ref="model_web_rbl_eintrag"/>
+            <field name="state">code</field>
+            <field name="code">model._cron_befunde_melden()</field>
+            <field name="interval_number">1</field>
+            <field name="interval_type">days</field>
+            <field name="active" eval="True"/>
+        </record>
+
         <record id="cron_fristen" model="ir.cron">
             <field name="name">Web RBL: abgelaufene Sperren zurücksetzen</field>
             <field name="model_id" ref="model_web_rbl_eintrag"/>

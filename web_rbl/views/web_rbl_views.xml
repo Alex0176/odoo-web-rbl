@@ -59,6 +59,13 @@
                     <div class="alert alert-info" role="alert"
                          invisible="not befund">
                         <field name="befund" nolabel="1" readonly="1"/>
+                        <button name="action_ticket_oeffnen" type="object"
+                                class="btn-link" icon="fa-ticket"
+                                string="Ticket öffnen"
+                                invisible="not ticket_id"/>
+                        <field name="ticket_nummer" invisible="1"/>
+                        <field name="ticket_id" invisible="1"/>
+                        <field name="ticket_modell" invisible="1"/>
                     </div>
                     <group>
                         <group>
