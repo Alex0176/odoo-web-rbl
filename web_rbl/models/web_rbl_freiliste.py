@@ -166,7 +166,50 @@ class WebRblFreiliste(models.Model):
 
     # ------------------------------------------------------------------
     def _cache_leeren(self):
+        """Den Zwischenspeicher leeren -- und die anderen Prozesse auch.
+
+        ``clear_cache`` MARKIERT nur; benachrichtigt wird erst durch
+        ``signal_changes``, und das ruft bei einem Schreibvorgang
+        ausserhalb des Anfrageweges niemand. Odoo tut es nach einer
+        Anfrage (``service/model.py``) und nach einem Cronlauf
+        (``ir_cron.py``) -- in einem Skript oder einer eigenen
+        Transaktion aber nicht.
+
+        Gemessen am 25.09.2026 auf der Testinstanz: Eine Adresse frisch
+        auf die Freiliste gesetzt, danach sofort eine Anfrage von
+        dieser Adresse -- und sie wurde trotzdem gesperrt. Der
+        laufende Dienst kannte die Liste noch in der alten Fassung.
+        Genau das darf bei einer Freiliste nicht passieren: Wer eine
+        Adresse freistellt, tut das meist, WEIL sie gerade
+        ausgesperrt ist.
+
+        NACH dem Festschreiben, nicht davor. Wer zuerst benachrichtigt
+        und dann schreibt, bringt die anderen Prozesse dazu, ihren
+        Zwischenspeicher zu leeren und sofort den ALTEN Stand neu
+        einzulesen -- danach halten sie ihn fuer frisch. Deshalb
+        haengt der Ruf am ``postcommit`` des Cursors.
+        """
         self.env.registry.clear_cache()
+        registry = self.env.registry
+
+        def benachrichtigen():
+            try:
+                if registry.ready:
+                    registry.signal_changes()
+            except Exception:  # noqa: BLE001
+                # Misslingt die Benachrichtigung, ist die Liste im
+                # eigenen Prozess trotzdem richtig und in den anderen
+                # spaetestens nach deren naechstem Neustart. Ein
+                # Fehler hier darf den Schreibvorgang nicht umwerfen.
+                _logger.warning(
+                    "Web RBL: Freiliste geaendert, andere Prozesse "
+                    "konnten aber nicht benachrichtigt werden.")
+
+        try:
+            self.env.cr.postcommit.add(benachrichtigen)
+        except AttributeError:
+            # Aeltere Cursor kennen postcommit nicht.
+            benachrichtigen()
 
     @api.model_create_multi
     def create(self, werteliste):
