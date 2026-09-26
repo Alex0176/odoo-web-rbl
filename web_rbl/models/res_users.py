@@ -44,7 +44,7 @@ verbucht wird ab dem ersten, gesperrt ab dem zehnten.
 """
 import logging
 
-from odoo import models
+from odoo import fields, models
 from odoo.exceptions import AccessDenied
 from odoo.http import request
 
@@ -173,6 +173,32 @@ class ResUsers(models.Model):
             benutzer = str(credential.get("login") or "")[:80]
         except Exception:  # noqa: BLE001
             benutzer = ""
+
+        # Einmal je Adresse und Ruhezeit, nicht bei jeder Anmeldung.
+        #
+        # Wer aus einem gelisteten Netz arbeitet -- ein Hotel, ein
+        # Mobilfunkanbieter, dessen Bereich auf einer Bogon-Liste
+        # steht --, meldet sich am Tag mehrmals an. Jede davon zu
+        # melden macht aus einem Befund ein Rauschen, und Rauschen
+        # liest niemand mehr. Der erste Fall ist der Befund; die
+        # weiteren innerhalb der Ruhezeit sind derselbe.
+        try:
+            ruhe = int(Parameter.get_param("web_rbl.verdacht_ruhe_stunden", "24"))
+        except (TypeError, ValueError):
+            ruhe = 24
+        if ruhe > 0:
+            seit = fields.Datetime.subtract(fields.Datetime.now(), hours=ruhe)
+            schon = self.env["web.rbl.treffer"].sudo().search_count([
+                ("eintrag_id.adresse", "=", adresse),
+                ("muster", "=", "anmeldung_verdacht"),
+                ("create_date", ">=", seit),
+            ], limit=1)
+            if schon:
+                _logger.info(
+                    "Web RBL: weitere gelungene Anmeldung von %s als '%s' "
+                    "innerhalb der Ruhezeit -- nicht erneut gemeldet.",
+                    adresse, benutzer or "?")
+                return
         # Das Kennwort wird nirgends beruehrt -- weder gelesen noch
         # vermerkt. Der Befund ist, DASS es gestimmt hat.
         _logger.warning(

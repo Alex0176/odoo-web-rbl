@@ -92,6 +92,11 @@
             web_rbl.verdacht_melden_an: Kennungen von Benutzern, die
             eine Aufgabe dazu bekommen sollen, durch Leerzeichen
             getrennt. Leer = nur ins Protokoll.
+
+            web_rbl.verdacht_ruhe_stunden: Nach einer Meldung bleibt
+            dieselbe Adresse so viele Stunden still, auch wenn sich
+            dort noch zehnmal jemand anmeldet. Der erste Fall ist der
+            Befund, die weiteren sind derselbe. 0 = jede Anmeldung.
         -->
         <record id="param_verdacht_aktiv" model="ir.config_parameter">
             <field name="key">web_rbl.verdacht_aktiv</field>
@@ -100,6 +105,10 @@
         <record id="param_verdacht_ab_bewertung" model="ir.config_parameter">
             <field name="key">web_rbl.verdacht_ab_bewertung</field>
             <field name="value">10</field>
+        </record>
+        <record id="param_verdacht_ruhe_stunden" model="ir.config_parameter">
+            <field name="key">web_rbl.verdacht_ruhe_stunden</field>
+            <field name="value">24</field>
         </record>
         <record id="param_anmeldung_ab_bewertung" model="ir.config_parameter">
             <field name="key">web_rbl.anmeldung_ab_bewertung</field>

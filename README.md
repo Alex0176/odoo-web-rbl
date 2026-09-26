@@ -132,6 +132,7 @@ ein Signal. Wer das einschaltet, soll es bewusst tun.
 | `web_rbl.muster.<name>` | — | `sperren`, `zaehlen` oder `melden` je Muster |
 | `web_rbl.muster.pflichtseite` | `melden` | Auf `sperren` stellen, um das maschinelle Abgrasen von Impressumsdaten auszusperren |
 | `web_rbl.treffer_aufbewahrung` | `30` | Tage, bevor alte Treffer entfernt werden |
+| `web_rbl.verdacht_ruhe_stunden` | `24` | Gelungene Anmeldung von auffälliger Adresse: nach einer Meldung bleibt dieselbe Adresse so lange still. `0` meldet jede Anmeldung |
 | `web_rbl.geolite2_schluessel` | — | MaxMind-Lizenzschlüssel (kostenlos, Konto nötig). Gesetzt, holt ein wöchentlicher Cron die GeoLite2-Datei selbst an den Ort aus `geoip_country_db` — das Verzeichnis muss dem Odoo-Benutzer gehören |
 | `web_rbl.geolite2_ausgabe` | `GeoLite2-Country` | Welche Ausgabe geholt wird; `GeoLite2-City` geht auch, ist aber sechsmal größer und für Länderregeln ohne Nutzen |
 | `web_rbl.geolite2_stand` | — | Wird vom Cron gesetzt: Erstellungsdatum der abgelegten Datei |
