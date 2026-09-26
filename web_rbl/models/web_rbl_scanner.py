@@ -111,8 +111,9 @@ class IrHttp(models.AbstractModel):
 
         JE ANFRAGE GENAU EINMAL.
         ------------------------
-        ``_serve_fallback`` wird fuer DIESELBE Anfrage mehrfach
-        gerufen -- Odoos Wegfindung probiert Sprachpraefixe und
+        Die Einhaenge im Anfrageweg (``_handle_error``, frueher
+        ``_serve_fallback``) koennen fuer DIESELBE Anfrage mehrfach
+        laufen -- Odoos Wegfindung probiert Sprachpraefixe und
         Rueckfallpfade durch. Ohne Markierung zaehlt jeder Fehlschlag
         doppelt, und die Schwelle von zwanzig wirkt wie zehn.
 
@@ -245,13 +246,28 @@ class IrHttp(models.AbstractModel):
 
     # ------------------------------------------------------------------
     @classmethod
-    def _serve_fallback(cls):
-        """Hier steht fest: keine Route gefunden, es wird ein 404."""
+    def _handle_error(cls, exception):
+        """Ein Fehlschlag ist, was mit 404 ENDET -- nicht, was so beginnt.
+
+        Frueher zaehlte ``_serve_fallback``: keine Route, also
+        Fehlschlag. Aber nicht jede Anfrage ohne Route wird ein 404.
+        Das Website-Modul macht aus ``/backup/`` eine 301 auf
+        ``/backup`` -- und zwar erst in der Fehlerbehandlung, NACH der
+        Ersatzsuche. Wer beim Betreten zaehlt, zaehlt eine Sonde auf
+        ``/backup/`` doppelt: einmal fuer die Umleitung, einmal fuer
+        das 404 dahinter. Gemessen am 26.09.2026: 59 Anfragen eines
+        Verzeichnis-Scanners, davon 22 echte 404 und 28 Umleitungen --
+        die Schwelle 20 war nach zehn Sonden erreicht statt nach
+        zwanzig. Hier steht die fertige Antwort; erst ihr Status sagt,
+        ob es ein Fehlschlag war.
+        """
+        antwort = super()._handle_error(exception)
         try:
-            cls._rbl_verhalten_merken(True)
+            if getattr(antwort, "status_code", 0) == 404:
+                cls._rbl_verhalten_merken(True)
         except Exception:  # noqa: BLE001
             _logger.exception("Web RBL: Fehlschlag nicht vermerkt.")
-        return super()._serve_fallback()
+        return antwort
 
     @classmethod
     def _post_dispatch(cls, response):
