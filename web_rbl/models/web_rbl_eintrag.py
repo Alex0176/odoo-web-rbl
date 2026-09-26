@@ -533,8 +533,11 @@ class WebRblEintrag(models.Model):
         # Adresse, die ploetzlich aus einem anderen Land kommt, ist
         # eine Angabe fuer sich.
         if land and eintrag.land_id.code != land:
-            staat = self.env["res.country"].sudo().search(
-                [("code", "=", land)], limit=1)
+            # res.country sortiert nach dem uebersetzten Namen; mit der
+            # Browsersprache eines Besuchers im Kontext bricht das ab
+            # ("Invalid language code"). Deshalb ohne Sprache und nach id.
+            staat = self.env["res.country"].sudo().with_context(lang=None).search(
+                [("code", "=", land)], limit=1, order="id")
             if staat:
                 eintrag.sudo().write({"land_id": staat.id})
 

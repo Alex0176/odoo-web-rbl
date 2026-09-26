@@ -104,7 +104,10 @@ class WebRblFreiliste(models.Model):
         Schreiben raeumt ihn in allen ab.
         """
         bereiche = {4: [], 6: []}
-        for satz in self.sudo().search([("aktiv", "=", True)]):
+        # Ohne Sprache, ohne Vorgabe-Sortierung: laeuft im Anfrageweg
+        # (siehe web_rbl_land._regeln, "Invalid language code").
+        for satz in self.sudo().with_context(lang=None).search(
+                [("aktiv", "=", True)], order="id"):
             try:
                 netz = ipaddress.ip_network(satz.bereich.strip(), strict=False)
             except ValueError:
@@ -154,7 +157,10 @@ class WebRblFreiliste(models.Model):
         except ValueError:
             return self.browse()
         bester, beste_breite = self.browse(), -1
-        for satz in self.sudo().search([("aktiv", "=", True)]):
+        # Ohne Sprache, ohne Vorgabe-Sortierung: laeuft im Anfrageweg
+        # (siehe web_rbl_land._regeln, "Invalid language code").
+        for satz in self.sudo().with_context(lang=None).search(
+                [("aktiv", "=", True)], order="id"):
             try:
                 netz = ipaddress.ip_network(satz.bereich.strip(), strict=False)
             except ValueError:

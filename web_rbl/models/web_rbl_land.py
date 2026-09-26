@@ -108,8 +108,21 @@ class WebRblLand(models.Model):
         Die Abfrage läuft bei jeder Anfrage. Ein Wörterbuch mit
         höchstens ein paar Dutzend Einträgen ist dafür genau richtig.
         """
+        # OHNE Sprache und OHNE die Vorgabe-Sortierung: Diese Abfrage
+        # laeuft im Anfrageweg, und dort traegt der Kontext die
+        # Browsersprache des Besuchers. Die Vorgabe-Sortierung geht
+        # ueber country_id, also ueber den UEBERSETZTEN Laendernamen --
+        # und Odoo bricht beim Sortieren nach einem uebersetzten Feld
+        # mit "Invalid language code: zh_CN" ab, wenn diese Sprache
+        # nicht installiert ist. Die Folge waere nicht ein Fehler,
+        # sondern eine ungeprueft durchgelassene Anfrage: Jeder
+        # Scanner mit fremdem Accept-Language umginge die gesamte
+        # Pruefung, bis der Cache einmal gefuellt ist. Gefunden am
+        # 26.09.2026 im Produktivlog.
         regeln = {}
-        for satz in self.sudo().search([("aktiv", "=", True)]):
+        saetze = self.sudo().with_context(lang=None).search(
+            [("aktiv", "=", True)], order="id")
+        for satz in saetze:
             if satz.code:
                 regeln[satz.code.upper()] = satz.stufe
         return regeln
