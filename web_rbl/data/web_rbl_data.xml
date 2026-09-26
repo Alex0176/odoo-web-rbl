@@ -222,6 +222,35 @@
             <field name="active" eval="True"/>
         </record>
 
+        <!--
+            Herkunftsland: Die GeoLite2-Datei fuehrt sich selbst nach,
+            sobald ein Lizenzschluessel eingetragen ist (kostenlos,
+            Konto bei MaxMind noetig). Ohne Schluessel tut der Lauf
+            nichts und ist deshalb gefahrlos eingeschaltet. Der
+            Schluessel gehoert in diesen Parameter und sonst nirgends
+            hin, insbesondere in kein Log und keine Sicherung.
+            Abgelegt wird an dem Ort, den geoip_country_db in der
+            Odoo-Konfiguration nennt; das Verzeichnis muss dem
+            Odoo-Benutzer gehoeren.
+        -->
+        <record id="param_geolite2_schluessel" model="ir.config_parameter">
+            <field name="key">web_rbl.geolite2_schluessel</field>
+            <field name="value"></field>
+        </record>
+        <record id="param_geolite2_ausgabe" model="ir.config_parameter">
+            <field name="key">web_rbl.geolite2_ausgabe</field>
+            <field name="value">GeoLite2-Country</field>
+        </record>
+        <record id="cron_geolite2" model="ir.cron">
+            <field name="name">Web RBL: GeoLite2-Länderdatenbank nachführen</field>
+            <field name="model_id" ref="model_web_rbl_land"/>
+            <field name="state">code</field>
+            <field name="code">model._cron_geolite2_abgleichen()</field>
+            <field name="interval_number">7</field>
+            <field name="interval_type">days</field>
+            <field name="active" eval="True"/>
+        </record>
+
         <record id="cron_befunde_melden" model="ir.cron">
             <field name="name">Web RBL: Befunde als Ticket melden</field>
             <field name="model_id" ref="model_web_rbl_eintrag"/>

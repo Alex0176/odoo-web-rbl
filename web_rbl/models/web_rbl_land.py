@@ -31,21 +31,44 @@ nachweislich keine Kunden hat.
 
 WAS ES BRAUCHT
 --------------
-Die GeoLite2-Datenbank von MaxMind, kostenlos, aber mit Konto:
-``/usr/share/GeoIP/GeoLite2-Country.mmdb``. Fehlt sie, bleibt das Feld
-schlicht leer und alles andere arbeitet unverändert weiter -- das
-Modul setzt sie nirgends voraus.
+Die GeoLite2-Datenbank von MaxMind, kostenlos, aber mit Konto. Odoo
+sucht sie an dem Ort, den ``geoip_country_db`` in der Konfiguration
+nennt (Vorgabe ``/usr/share/GeoIP/GeoLite2-Country.mmdb``). Fehlt
+sie, bleibt das Feld schlicht leer und alles andere arbeitet
+unverändert weiter -- das Modul setzt sie nirgends voraus.
+
+Das Modul kann die Datei selbst nachführen: Mit einem Lizenzschlüssel
+in ``web_rbl.geolite2_schluessel`` holt ``_cron_geolite2_abgleichen``
+wöchentlich die aktuelle Ausgabe und legt sie an genau diesem Ort ab,
+sofern der Odoo-Benutzer dort schreiben darf. Ohne Schlüssel tut der
+Lauf nichts. Eine Datei, die neu ERSCHEINT, sieht der laufende Dienst
+sofort -- Odoo versucht das Öffnen bei jeder Anfrage erneut, solange es
+scheitert. Eine Datei, die ERSETZT wird, sieht er erst nach dem
+nächsten Neustart: Der Leser hält die alte im Speicher. Für Länder,
+die sich alle paar Monate um ein paar Netze verschieben, ist das
+unerheblich.
 
 Und eine Einordnung, die in Europa dazugehört: Eine IP-Adresse einem
 Ort zuzuordnen ist Verarbeitung personenbezogener Daten. Das gehört
 ins Verarbeitungsverzeichnis, auch wenn die Abfrage örtlich
 stattfindet und niemand erfährt, wonach man fragt.
 """
+import datetime
+import io
 import logging
+import os
+import tarfile
+import tempfile
 
 from odoo import api, fields, models, tools
 
 _logger = logging.getLogger(__name__)
+
+# Der Bezugsweg von MaxMind. Der Schlüssel steht NUR in der Adresse;
+# er darf in keiner Meldung und keinem Log auftauchen.
+GEOLITE2_URL = ("https://download.maxmind.com/app/geoip_download"
+                "?edition_id={ausgabe}&license_key={schluessel}&suffix=tar.gz")
+GEOLITE2_HOECHSTGROESSE = 96 * 1024 * 1024   # City ist ~60 MB gepackt
 
 
 class WebRblLand(models.Model):
@@ -130,3 +153,115 @@ class WebRblLand(models.Model):
         ergebnis = super().unlink()
         self._cache_leeren()
         return ergebnis
+
+    # ------------------------------------------------------------------
+    # GeoLite2 nachführen
+    # ------------------------------------------------------------------
+    @api.model
+    def _geolite2_stand(self, pfad):
+        """Erstellungsdatum der Datei unter ``pfad``, None wenn unlesbar."""
+        try:
+            import geoip2.database
+            with geoip2.database.Reader(pfad) as leser:
+                return leser.metadata().build_epoch
+        except Exception:  # noqa: BLE001 -- fehlt, kaputt, kein geoip2
+            return None
+
+    @api.model
+    def _cron_geolite2_abgleichen(self):
+        """Die GeoLite2-Datei holen und ablegen, wenn sie neuer ist.
+
+        Läuft wöchentlich; MaxMind veröffentlicht dienstags und
+        freitags. Der Ablauf ist so gebaut, dass zu keinem Zeitpunkt
+        eine halbe Datei am Zielort liegt: herunterladen, entpacken,
+        mit dem Leser öffnen, Stand vergleichen, erst dann per
+        ``rename`` an die Stelle setzen.
+        """
+        Param = self.env["ir.config_parameter"].sudo()
+        schluessel = (Param.get_param("web_rbl.geolite2_schluessel") or "").strip()
+        if not schluessel:
+            _logger.debug("Web RBL: kein GeoLite2-Schlüssel, Abgleich übersprungen.")
+            return True
+        ausgabe = (Param.get_param("web_rbl.geolite2_ausgabe") or "GeoLite2-Country").strip()
+        ziel = tools.config.get("geoip_country_db")
+        if "City" in ausgabe:
+            ziel = tools.config.get("geoip_city_db")
+        if not ziel:
+            _logger.warning("Web RBL: geoip_country_db ist in der Konfiguration leer.")
+            return True
+
+        verzeichnis = os.path.dirname(ziel)
+        if not os.path.isdir(verzeichnis) or not os.access(verzeichnis, os.W_OK):
+            _logger.warning(
+                "Web RBL: GeoLite2 kann nicht abgelegt werden -- %s fehlt oder "
+                "ist für diesen Benutzer nicht beschreibbar.", verzeichnis)
+            return True
+
+        import urllib.error
+        import urllib.request
+        url = GEOLITE2_URL.format(ausgabe=ausgabe, schluessel=schluessel)
+        try:
+            anfrage = urllib.request.Request(
+                url, headers={"User-Agent": "odoo-web-rbl"})
+            with urllib.request.urlopen(anfrage, timeout=120) as antwort:
+                roh = antwort.read(GEOLITE2_HOECHSTGROESSE + 1)
+        except urllib.error.HTTPError as fehler:
+            # 401: Schlüssel falsch oder abgelaufen. 400: Ausgabe unbekannt.
+            _logger.warning("Web RBL: GeoLite2-Bezug abgewiesen (HTTP %s).",
+                            fehler.code)
+            return True
+        except (urllib.error.URLError, OSError) as fehler:
+            _logger.warning("Web RBL: GeoLite2-Bezug gescheitert: %s",
+                            str(fehler).replace(schluessel, "***")[:200])
+            return True
+        if len(roh) > GEOLITE2_HOECHSTGROESSE:
+            _logger.warning("Web RBL: GeoLite2-Antwort grösser als erlaubt, verworfen.")
+            return True
+
+        try:
+            with tarfile.open(fileobj=io.BytesIO(roh), mode="r:gz") as archiv:
+                glieder = [g for g in archiv.getmembers()
+                           if g.isfile() and g.name.endswith(".mmdb")]
+                if len(glieder) != 1:
+                    _logger.warning("Web RBL: GeoLite2-Archiv enthält %s .mmdb-Dateien, "
+                                    "erwartet eine.", len(glieder))
+                    return True
+                inhalt = archiv.extractfile(glieder[0]).read()
+        except (tarfile.TarError, OSError, EOFError) as fehler:
+            _logger.warning("Web RBL: GeoLite2-Archiv unlesbar: %s", fehler)
+            return True
+
+        # Erst in eine Nachbardatei, dann prüfen, dann umbenennen.
+        handle, vorlaeufig = tempfile.mkstemp(
+            dir=verzeichnis, prefix=".geolite2-", suffix=".mmdb")
+        try:
+            with os.fdopen(handle, "wb") as datei:
+                datei.write(inhalt)
+            os.chmod(vorlaeufig, 0o644)
+            neu = self._geolite2_stand(vorlaeufig)
+            if neu is None:
+                _logger.warning("Web RBL: heruntergeladene GeoLite2-Datei ist "
+                                "kein gültiger Datenbestand, verworfen.")
+                return True
+            alt = self._geolite2_stand(ziel)
+            if alt is not None and alt >= neu:
+                Param.set_param("web_rbl.geolite2_stand",
+                                str(datetime.date.fromtimestamp(alt)))
+                _logger.info("Web RBL: GeoLite2 (%s) ist auf dem Stand vom %s, "
+                             "nichts zu tun.", ausgabe,
+                             datetime.date.fromtimestamp(alt))
+                return True
+            os.replace(vorlaeufig, ziel)
+            vorlaeufig = None
+        finally:
+            if vorlaeufig and os.path.exists(vorlaeufig):
+                os.unlink(vorlaeufig)
+
+        stand = str(datetime.date.fromtimestamp(neu))
+        Param.set_param("web_rbl.geolite2_stand", stand)
+        _logger.info(
+            "Web RBL: GeoLite2 (%s) auf Stand %s abgelegt unter %s.%s",
+            ausgabe, stand, ziel,
+            "" if alt is None else
+            " Laufende Prozesse sehen den neuen Stand erst nach dem Neustart.")
+        return True

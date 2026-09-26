@@ -40,10 +40,12 @@
                 Verdacht.
             </p>
             <p>
-                Braucht die GeoLite2-Datenbank unter
-                <code>/usr/share/GeoIP/GeoLite2-Country.mmdb</code>.
-                Fehlt sie, bleibt das Landfeld leer und alles andere
-                arbeitet unverändert weiter.
+                Braucht die GeoLite2-Datenbank von MaxMind an dem Ort,
+                den <code>geoip_country_db</code> in der Odoo-Konfiguration
+                nennt. Mit einem Lizenzschlüssel in
+                <code>web_rbl.geolite2_schluessel</code> führt das Modul
+                sie wöchentlich selbst nach. Fehlt sie, bleibt das
+                Landfeld leer und alles andere arbeitet unverändert weiter.
             </p>
         </field>
     </record>
