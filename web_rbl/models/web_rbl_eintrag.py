@@ -152,6 +152,14 @@ class WebRblEintrag(models.Model):
     # aussagt, nicht ueber den Schaden.
     GEWICHT = {
         "koeder": 60,            # hat eine Faelschung gelesen und gehandelt
+        # Fuer-Menschen-unsichtbaren, nofollow-Verweis abgerufen --
+        # so beweissicher wie ein Koederanbiss, aber ohne dass vorher
+        # schon ein anderes Muster angeschlagen haben musste.
+        "falle": 60,
+        # JNDI-Einschleusung (Log4Shell): bei Erfolg Codeausfuehrung
+        # aus der Ferne. Faelschungssicherer als fast jedes andere
+        # Muster -- diese Zeichenfolge hat keinen legitimen Zweck.
+        "jndi": 55,
         # Ausfuehrungsversuch: will nicht lesen, sondern TUN.
         "ausfuehrung": 50,
         # Webshell-Suche: sucht eine BEREITS INSTALLIERTE Hintertuer.
@@ -164,6 +172,8 @@ class WebRblEintrag(models.Model):
         "vcs": 30,
         "bauanweisung": 25,
         "werkzeugkette": 25,
+        "diagnosepfad": 30,      # Fehlersuch-Oberflaeche, verraet oft mehr als geplant
+        "ki_schnittstelle": 15,  # sucht eine verwaiste KI-Anbindung, kein eigener Angriff
         # Datenbankverwalter: sucht das Hauptkennwort, also den
         # Zugang zu ALLEN Datenbanken auf einmal.
         "odoo_dbverwalter": 40,

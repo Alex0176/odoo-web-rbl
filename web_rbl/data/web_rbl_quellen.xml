@@ -2,7 +2,7 @@
 <odoo>
     <data noupdate="1">
         <!--
-            Vier frei zugaengliche Quellen, alle ohne Anmeldung.
+            Sieben frei zugaengliche Quellen, alle ohne Anmeldung.
             ALLE auf "melden" ausgeliefert: Wer eine fremde Liste
             scharf schaltet, uebernimmt fremdes Urteil. Erst ansehen,
             wen sie bei einem selbst treffen wuerde, dann entscheiden.
@@ -48,6 +48,36 @@ Webverkehr nichts verloren haben.</field>
 vier Quellen und damit die mit dem hoechsten Fehlalarmrisiko fuer
 Webverkehr: Eine Adresse, die anderswo SSH durchprobiert hat, sagt
 ueber einen Webserver wenig. Bewusst als Letzte einsortiert.</field>
+        </record>
+
+        <record id="quelle_cins" model="web.rbl.quelle">
+            <field name="name">CINS Army</field>
+            <field name="sequence">50</field>
+            <field name="url">https://cinsscore.com/list/ci-badguys.txt</field>
+            <field name="stufe">melden</field>
+            <field name="beschreibung">Adressen, deren Verhalten ueber viele Sensoren hinweg schlecht
+bewertet wurde, aber noch nicht auf anderen grossen Listen stehen --
+also frueher erkannt als anderswo, dafuer mit mehr Fehlalarmrisiko.</field>
+        </record>
+
+        <record id="quelle_emergingthreats" model="web.rbl.quelle">
+            <field name="name">Emerging Threats Compromised IPs</field>
+            <field name="sequence">60</field>
+            <field name="url">https://rules.emergingthreats.net/blockrules/compromised-ips.txt</field>
+            <field name="stufe">melden</field>
+            <field name="beschreibung">Adressen, die nach Einschaetzung von Proofpoint aktiv unter fremder
+Kontrolle stehen -- kompromittierte Maschinen, nicht nur verdaechtige.
+Kurz und eng gehalten, geringes Fehlalarmrisiko.</field>
+        </record>
+
+        <record id="quelle_greensnow" model="web.rbl.quelle">
+            <field name="name">GreenSnow</field>
+            <field name="sequence">70</field>
+            <field name="url">https://blocklist.greensnow.co/greensnow.txt</field>
+            <field name="stufe">melden</field>
+            <field name="beschreibung">Gemeldete Angreifer aus einem eigenen Sensornetz, aehnlich breit wie
+blocklist.de. Zweite Quelle fuer denselben Angriffstyp schadet nicht --
+wer auf beiden steht, ist es mit groesserer Sicherheit auch wirklich.</field>
         </record>
 
         <record id="cron_fremdquellen" model="ir.cron">

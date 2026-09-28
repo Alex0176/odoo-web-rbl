@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <!--
+        Der unsichtbare Verweis.
+
+        DREI EIGENSCHAFTEN, DIE ZUSAMMEN WIRKEN MUESSEN.
+        1. position:absolute ausserhalb des sichtbaren Bereichs,
+           kein Mensch sieht ihn, auch nicht mit einem Bildschirmleser
+           (deshalb zusaetzlich aria-hidden).
+        2. rel="nofollow", eine Suchmaschine, die sich an die Regeln
+           haelt, folgt diesem Verweis nicht. Das ist der Unterschied,
+           um den es geht: Indexieren ist kein Angriff.
+        3. tabindex="-1", auch per Tastatur nicht erreichbar, damit
+           kein Mensch aus Versehen hineingerät.
+
+        Wer ihn trotzdem abruft, hat die Seite roh eingelesen und
+        folgt jedem Verweis blind, kein Verhalten, das ein Mensch
+        oder eine regelkonforme Suchmaschine zeigt.
+    -->
+    <template id="web_rbl_falle" inherit_id="website.layout">
+        <xpath expr="//body" position="inside">
+            <a t-att-href="request.env['ir.http']._rbl_falle_pfad_sicherstellen()"
+               rel="nofollow" tabindex="-1" aria-hidden="true"
+               style="position:absolute;left:-9999px;top:-9999px;width:1px;height:1px;overflow:hidden;">‍</a>
+        </xpath>
+    </template>
+
+</odoo>

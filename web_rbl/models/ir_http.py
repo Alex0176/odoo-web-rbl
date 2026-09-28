@@ -25,6 +25,7 @@ Datenbankzugriff über die Sperrprüfung hinaus, ohne Protokollzeile.
 
 import logging
 import re
+import secrets
 
 from werkzeug.exceptions import Forbidden
 
@@ -156,6 +157,21 @@ BEFUND = {
                     "Schreibweise, die es bei uns nicht gibt -- das "
                     "Muster eines Sammlers, der Pflichtangaben "
                     "durchprobiert. Siehe web_rbl.muster.pflichtseite.",
+    "jndi": "Versuch einer JNDI-Einschleusung (Log4Shell). Erfasst "
+            "wird nur der Pfad -- die uebliche Angriffsform ueber "
+            "Kopfzeilen wie User-Agent sieht dieses Muster nicht.",
+    "diagnosepfad": "Diagnose- oder Fehlersuch-Oberflaeche einer "
+                    "fremden Werkzeugkette (Laravel, Django, Symfony, "
+                    "Spring). Existiert bei uns nicht, verraet bei "
+                    "anderer Software oft mehr als beabsichtigt.",
+    "ki_schnittstelle": "Aufruf einer Schnittstelle, wie sie "
+                        "KI-Werkzeuge anbieten (OpenAI-kompatible "
+                        "API). Odoo liefert so etwas nicht -- die "
+                        "Suche nach einer verwaisten Anbindung.",
+    "falle": "Ein fuer Menschen unsichtbarer, mit rel=nofollow "
+             "versehener Verweis wurde abgerufen. Keine Suchmaschine, "
+             "die sich an die Regeln haelt, tut das -- ein Fehlalarm "
+             "ist praktisch ausgeschlossen.",
 }
 
 MUSTER = (
@@ -378,6 +394,28 @@ MUSTER = (
         r"(^|/)(shell|cmd|backdoor|c99|r57)\.", re.I)),
     ("konfig", SPERREN, re.compile(
         r"(^|/)(config\.(json|yml|yaml|ini|bak)|\.aws/|\.ssh/|id_rsa)", re.I)),
+
+    # JNDI-Einschleusung (Log4Shell, CVE-2021-44228). Jahre nach der
+    # Veroeffentlichung wird immer noch flaechendeckend danach gesucht --
+    # kein legitimer Aufruf enthaelt das je. Erfasst wird nur der PFAD;
+    # die uebliche Angriffsform ueber Kopfzeilen (User-Agent, Referer)
+    # sieht dieses Muster NICHT, weil web_rbl nur gegen den Pfad prueft.
+    ("jndi", SPERREN, re.compile(
+        r"\$\{(jndi:|\$\{::-|lower:j|upper:j)", re.I)),
+
+    # Diagnose- und Fehlersuch-Oberflaechen fremder Werkzeugketten.
+    # Sie liefern auf einer Odoo-Seite nie eine Antwort, verraten aber
+    # bei anderer Software oft mehr als beabsichtigt -- ``heapdump``
+    # etwa einen Speicherauszug mit allem, was gerade im Programm liegt.
+    ("diagnosepfad", SPERREN, re.compile(
+        r"(^|/)(_profiler|__debug__|telescope|_ignition|"
+        r"actuator/(heapdump|beans|mappings|threaddump))($|/|\?)", re.I)),
+
+    # Schnittstellen, wie sie KI-Werkzeuge (OpenAI-kompatible APIs)
+    # anbieten. Odoo liefert so etwas nicht -- ein Treffer ist die
+    # Suche nach einer verwaisten, oft unbewachten KI-Anbindung.
+    ("ki_schnittstelle", SPERREN, re.compile(
+        r"(^|/)v1/(chat/completions|embeddings|models)($|/|\?)", re.I)),
 )
 
 
@@ -913,6 +951,33 @@ class IrHttp(models.AbstractModel):
             web_rbl.muster.php        = zaehlen
         """
         pfad = pfad or ""
+
+        # DIE FALLE -- vor jedem Muster, weil sie die schaerfste
+        # Aussage von allen ist.
+        #
+        # Ein zweites Modul (``web_rbl_website``, optional) legt einen
+        # Verweis in jede Seite, der fuer Menschen unsichtbar ist und
+        # ``rel="nofollow"`` traegt. Eine Suchmaschine, die sich an
+        # die Regeln haelt, findet ihn nie oder folgt ihm nicht --
+        # genau das ist der Unterschied, um den es hier geht: Indexieren
+        # ist kein Angriff, aber wer eine Seite roh einliest und JEDEM
+        # ``<a href>`` folgt, ohne auf Sichtbarkeit oder ``nofollow`` zu
+        # achten, tut etwas anderes. Kein Mensch klickt einen Verweis,
+        # den er nicht sehen kann.
+        #
+        # Anders als jedes Muster unten braucht die Falle keine
+        # Vorgeschichte: Ein einziger Treffer ist so beweissicher wie
+        # ein Koederanbiss, nur ohne dass vorher schon etwas anderes
+        # angeschlagen haben musste.
+        if Parameter is not None:
+            falle = Parameter.get_param("web_rbl.falle_pfad") or ""
+            if falle and pfad.rstrip("/") == falle.rstrip("/"):
+                stufe = SPERREN
+                gesetzt = Parameter.get_param("web_rbl.muster.falle")
+                if gesetzt in (SPERREN, ZAEHLEN, MELDEN):
+                    stufe = gesetzt
+                return "falle", stufe
+
         for name, vorgabe, regel in MUSTER:
             if not regel.search(pfad):
                 continue
@@ -947,6 +1012,29 @@ class IrHttp(models.AbstractModel):
                     stufe = gesetzt
             return "pflichtseite_fehlt", stufe
         return "", ""
+
+    @classmethod
+    def _rbl_falle_pfad_sicherstellen(cls):
+        """Den Fallenpfad liefern, ihn beim ersten Aufruf anlegen.
+
+        Bewusst NICHT bei der Installation erzeugt, sondern erst hier:
+        Das Kernmodul soll ohne das optionale Website-Modul weiter
+        genau nichts an den ausgelieferten Seiten aendern. Erst wer
+        ``web_rbl_website`` installiert -- und damit eine Vorlage hat,
+        die diesen Pfad tatsaechlich einbindet -- loest die Erzeugung
+        aus.
+
+        Der Pfad ist absichtlich unauffaellig und nirgends im Modul
+        als Wort wiederzufinden, das ihn als unseren verraten wuerde.
+        """
+        if not request or not request.env:
+            return ""
+        Parameter = request.env["ir.config_parameter"].sudo()
+        pfad = Parameter.get_param("web_rbl.falle_pfad")
+        if not pfad:
+            pfad = "/mitglieder-" + secrets.token_hex(6)
+            Parameter.set_param("web_rbl.falle_pfad", pfad)
+        return pfad
 
     # ------------------------------------------------------------------
     # Die Antwort
