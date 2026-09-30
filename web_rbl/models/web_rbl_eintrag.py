@@ -173,6 +173,15 @@ class WebRblEintrag(models.Model):
         "bauanweisung": 25,
         "werkzeugkette": 25,
         "diagnosepfad": 30,      # Fehlersuch-Oberflaeche, verraet oft mehr als geplant
+        "sql_injektion": 45,     # kein Mensch tippt UNION SELECT in eine Suche
+        "befehl_abfrage": 50,
+        "dateizugriff_abfrage": 40,
+        "skript_injektion": 35,
+        "konfigdatei": 30,
+        "geheimnisdatei": 35,
+        "systempfad": 40,
+        "sicherung": 25,
+        "schnittstellensuche": 25,
         "ki_schnittstelle": 15,  # sucht eine verwaiste KI-Anbindung, kein eigener Angriff
         # Datenbankverwalter: sucht das Hauptkennwort, also den
         # Zugang zu ALLEN Datenbanken auf einmal.

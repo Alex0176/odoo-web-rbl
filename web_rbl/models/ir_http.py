@@ -134,6 +134,39 @@ BEFUND = {
                           "Zugangsdaten sind abhandengekommen. Beim "
                           "Benutzer nachfragen, BEVOR etwas gesperrt "
                           "wird -- eine Sperre traefe sonst ihn.",
+    "sql_injektion": "SQL-Einschleusung in der Abfragezeichenfolge. "
+                     "Kein Mensch tippt 'UNION SELECT' oder "
+                     "\"' OR 1=1\" in eine Suche -- ein Werkzeug wie "
+                     "sqlmap tut es. Das Modul sieht nur GET-Parameter; "
+                     "Einschleusungen im Anfragekoerper bleiben "
+                     "unerkannt.",
+    "befehl_abfrage": "Befehls- oder Vorlageneinschleusung in der "
+                      "Abfragezeichenfolge (Shell-Verkettung, "
+                      "${jndi:...}). Sucht eine Luecke, um Code "
+                      "auszufuehren.",
+    "dateizugriff_abfrage": "Dateipfade oder fremde Protokolle in der "
+                            "Abfragezeichenfolge (../../etc/passwd, "
+                            "file://, php://). Versuch, Dateien zu lesen "
+                            "oder den Server zu Abrufen zu verleiten.",
+    "skript_injektion": "Skript-Einschleusung (XSS) in der "
+                        "Abfragezeichenfolge. Ein Besucher ohne "
+                        "Schadabsicht hat kein <script> in der Adresse.",
+    "konfigdatei": "Suche nach Konfigurationsdateien im Web-Wurzel- "
+                   "oder Anwendungsverzeichnis (env.js, config.json, "
+                   "/api/config). Teil einer Sammelwelle mit gemeinsamer "
+                   "Wortliste.",
+    "geheimnisdatei": "Suche nach Zugangsdaten und Schluesseln (Firebase, "
+                      "Google-Dienstkonto, Terraform-Zustand, "
+                      "Shell-Dateien). Wer das findet, hat die "
+                      "Infrastruktur dahinter.",
+    "systempfad": "Zugriff auf das Dateisystem des Servers (/@fs/, "
+                  "/proc/self, Kubernetes-Dienstkonto).",
+    "sicherung": "Suche nach Sicherungskopien von Code oder "
+                 "Konfiguration (.php.bak, .env~, .sql).",
+    "schnittstellensuche": "Suche nach Schnittstellenbeschreibungen oder "
+                           "Verwaltungsoberflaechen fremder Software "
+                           "(openapi.json, swagger, /console, actuator, "
+                           "wp-json). Existiert bei Odoo nicht.",
     "ausfuehrung": "Versuch, einen BEFEHL auszufuehren -- kein "
                    "Lesezugriff. Wer das probiert, will nicht sehen, "
                    "was da ist, sondern etwas tun. Der schwerste "
@@ -225,7 +258,7 @@ MUSTER = (
     # -------------------------------------------------------------------
 
     ("dotenv", SPERREN, re.compile(
-        r"(^|/)\.env(\.|$|\?)|/\.env[a-z.]*$", re.I)),
+        r"(^|/)\.env(\.|$|\?)|/\.env[a-z0-9._~-]*$", re.I)),
     ("vcs", SPERREN, re.compile(
         r"(^|/)\.(git|svn|hg)(/|$)", re.I)),
     ("wordpress", SPERREN, re.compile(
@@ -380,13 +413,26 @@ MUSTER = (
     # Adressen in siebzehn Tagen.
     ("ausfuehrung", SPERREN, re.compile(
         r"(^|/)(api/fs/(exec|write)|api/exec|api/run|api/eval|"
-        r"api/shell|actuator/env|actuator/gateway)($|/|\?)", re.I)),
+        r"api/shell|actuator/env|actuator/gateway|"
+        # Gemessen in den Sammelwellen: Code-Ausfuehrung und
+        # Dokumentenlesen bei KI-Werkzeugketten (Langflow, Feast).
+        r"exec-py|read-document|run[-_]python|run[-_]code|langflow|"
+        r"api/v1/validate/code|"
+        # Kanarienpfad aus einer Sondierungswelle: nur ein Scanner
+        # kennt ihn.
+        r"z9x8c7v6b5[a-z0-9-]*)($|/|\?)", re.I)),
     ("werkzeugkette", SPERREN, re.compile(
         r"(^|/)("
         r"mcp|api/fs/read|api/inngest|inngest|"
-        r"__vite_[a-z_]+|\.vite/|api/designer/v[0-9]+/|"
+        r"__vite_[a-z_]+|"
         r"api/templates/preview"
-        r")($|/|\?)", re.I)),
+        r")($|/|\?)"
+        # Diese drei haben einen Dateinamen HINTER dem Verzeichnis
+        # (/api/designer/v1/file-content). Mit dem Abschluss oben
+        # trafen sie nie -- gemessen: 78 Abrufe von 34 Adressen blieben
+        # unbeanstandet.
+        r"|(^|/)(\.vite/|api/designer/v[0-9]+/|_astro/)"
+        r"|\.astro\.mjs\.map($|\?)", re.I)),
 
     ("dbtool", SPERREN, re.compile(
         r"(^|/)(phpmyadmin|pma|adminer|mysqladmin)(/|$)", re.I)),
@@ -416,6 +462,142 @@ MUSTER = (
     # Suche nach einer verwaisten, oft unbewachten KI-Anbindung.
     ("ki_schnittstelle", SPERREN, re.compile(
         r"(^|/)v1/(chat/completions|embeddings|models)($|/|\?)", re.I)),
+
+    # ---- DIE SAMMELWELLEN VOM 30.09.2026 ----------------------------
+    #
+    # Die Protokolle zeigen Wellen, in denen 30 bis 40 VERSCHIEDENE
+    # Adressen je dieselben 100 Pfade durchprobieren -- ein Botnetz mit
+    # einer gemeinsamen Wortliste. Jeder dieser Pfade existiert auf
+    # keiner Odoo-Seite. Die folgenden Muster nennen nur Namen, die es
+    # bei uns nie gibt; Namen, die eine Webseite haben kann (/health,
+    # /docs, /manifest.json, /sw.js, /sitemap_index.xml), stehen bewusst
+    # NICHT drin -- die holen auch Suchmaschinen und Werkzeuge.
+    #
+    # Konfigurationsdateien im Wurzelverzeichnis oder unter den ueblichen
+    # Anwendungsverzeichnissen. Verankert mit ``^``, weil Odoo unter
+    # /<modul>/static/... durchaus eine ``config.js`` ausliefern kann.
+    ("konfigdatei", SPERREN, re.compile(
+        r"^/((config|public|app|api|core|backend|instance|static|assets|"
+        r"dist|src|settings)/)?"
+        r"(env|config|configuration|settings|environment|constants|"
+        r"credentials|runtime-config|app-config|__env|push_config|"
+        r"secrets?)\.(js|json|py|env|ya?ml|toml|ini|cfg|conf)($|\?)"
+        r"|^/api/(config|settings|env|account|4/config|"
+        r"console/[a-z_]+|session/properties)($|/|\?)"
+        r"|^/(v1/onboarding/config|__/firebase/|__api__/|api/sonicos/)",
+        re.I)),
+    # Zugangsdaten und Schluessel fremder Systeme, Shell-Dateien,
+    # Zustandsdateien der Infrastruktur.
+    ("geheimnisdatei", SPERREN, re.compile(
+        r"(^|/)("
+        r"service[-_]?account[^/]*\.json|firebase[-_a-z]*\.json|"
+        r"google[-_](service[-_]account|credentials|services)[^/]*\.json|"
+        r"gcp[-_a-z]*\.json|gc-service\.json|sa\.json|"
+        r"(server|private|privkey|id_rsa|key)\.(pem|key)|"
+        r"(server|private|privkey)[^/]*\.(pem|key)|"
+        r"\.(bash_history|bashrc|bash_profile|zshrc|profile|dockerenv|"
+        r"kube|docker|streamlit|npmrc)|"
+        r"terraform\.(tfstate|tfvars)[^/]*|serverless\.ya?ml|values\.ya?ml|"
+        r"secrets?\.(env|toml|json|ya?ml)"
+        r")($|/|\?)", re.I)),
+    # Dateisystem des Servers: Vite-Dateizugriff, Prozessdaten, die
+    # Schluessel des Kubernetes-Dienstkontos.
+    ("systempfad", SPERREN, re.compile(
+        r"(^|/)(@fs|@id|proc/(self|[0-9]+)|var/run/secrets)(/|$)"
+        r"|^/(etc/(passwd|shadow|hosts|group)|root/|home/[^/]+/\.ssh)",
+        re.I)),
+    # Sicherungskopien: ``wp-config.php.bak``, ``index.php~``.
+    ("sicherung", SPERREN, re.compile(
+        r"\.(php[0-9]?|inc|env|ini|conf|cfg|config|ya?ml|json|py|js|sql)"
+        r"[._~]?(bak|old|orig|save|swp|backup|dist|sample|copy|\d{1,2})"
+        r"($|\?)"
+        r"|\.(bak|orig|swp|sql|sqlite3?|dump)($|\?)"
+        r"|[a-z0-9]~($|\?)", re.I)),
+    # Suche nach Schnittstellenbeschreibungen, Verwaltungsoberflaechen
+    # und Diagnoseseiten anderer Software.
+    ("schnittstellensuche", SPERREN, re.compile(
+        r"^/(api/)?(openapi(\.json|\.ya?ml)|"
+        r"swagger([-_.][a-z]+)*(\.json|\.ya?ml|/|$)|api-docs|redoc)($|\?)"
+        r"|^/v[0-9]/api-docs($|\?)"
+        r"|^/(console|userfiles|wp-json|wp-cron|wp-config)($|/|\?)"
+        r"|^/(actuator|debug/(vars|pprof)|_debugbar|server-status|"
+        r"server-info|manage/(env|health|info|beans))($|/|\?)"
+        r"|(^|/)(elmah|trace)\.axd($|\?)", re.I)),
+)
+
+# ---- DIE ABFRAGEZEICHENFOLGE --------------------------------------------
+#
+# Die Muster oben sehen nur den PFAD. Eine SQL-Einschleusung steht aber
+# fast nie im Pfad, sondern dahinter: ``/shop?search=' UNION SELECT ...``.
+# Diese Muster werden gegen die zweifach URL-dekodierte Abfrage
+# gehalten.
+#
+# Bewusst STRUKTUR und nicht Stichwort: Wer im Shop nach "select" oder
+# "union" sucht, ist kein Angreifer. ``union select`` hintereinander,
+# ``' or 1=1``, ``sleep(5)`` oder ``information_schema`` haben dagegen
+# keine harmlose Lesart.
+_SQL = re.compile("|".join((
+    r"\bunion\s{1,20}(all\s{1,20})?select\b",
+    r"\bselect\b.{1,120}?\bfrom\b.{1,60}?"
+    r"(information_schema|pg_catalog|pg_class|pg_user|pg_shadow|sysobjects|"
+    r"sqlite_master|mysql\.user|\bdual\b|res_users|ir_config_parameter)",
+    r"\b(information_schema|pg_catalog|pg_sleep|pg_read_file|pg_ls_dir|"
+    r"sqlite_master|sysobjects|xp_cmdshell|load_file|extractvalue|"
+    r"updatexml|group_concat|dbms_pipe|utl_inaddr)\b",
+    r"\b(sleep|benchmark)\s{0,3}\(\s{0,3}\d",
+    r"\bwaitfor\s{1,5}delay\b",
+    r"['\")]\s{0,5}(or|and)\s{1,5}['\"(]?\w{1,20}['\")]?\s{0,5}"
+    r"(=|like\b|<|>)\s{0,5}['\"(]?\w",
+    r"['\"]\s{0,5}(or|and)\s{0,5}['\"]{1,2}\s{0,5}=",
+    r"\b(or|and)\s{1,5}(?P<n>\d{1,6})\s{0,3}=\s{0,3}(?P=n)\b",
+    r";\s{0,5}(drop|alter|truncate)\s{1,5}(table|database)\b",
+    r";\s{0,5}(delete\s{1,5}from|insert\s{1,5}into|"
+    r"update\s{1,5}\w{1,40}\s{1,5}set|shutdown\b|exec(ute)?\s)",
+    r"\binto\s{1,5}(out|dump)file\b",
+    r"@@(version|datadir|hostname)",
+    r"\border\s{1,5}by\s{1,5}\d{1,3}\s{0,5}(--|#|/\*)",
+    r"\bhaving\s{1,5}\d{1,3}\s{0,3}=\s{0,3}\d",
+    r"['\"]\s{0,5}(--|#|/\*)\s{0,5}$",
+    r"\b(cast|convert|char|chr|ascii|substring|substr|concat)\s{0,3}\("
+    r".{0,60}?\bselect\b",
+)), re.I | re.S)
+
+_SKRIPT = re.compile("|".join((
+    r"<\s{0,3}/?\s{0,3}(script|iframe|object|embed|svg)\b",
+    r"<\s{0,3}(img|body|input|details|video|audio|marquee)\b"
+    r"[^>]{0,200}\bon[a-z]{3,20}\s{0,3}=",
+    r"javascript\s{0,3}:\s{0,3}"
+    r"(alert|prompt|confirm|eval|document|window|fetch|top|self)\b",
+    r"\bon(error|load|mouseover|mouseenter|focus|click|toggle|begin)"
+    r"\s{0,3}=\s{0,3}[\"']?\s{0,3}"
+    r"(alert|prompt|confirm|eval|document|window|fetch|top|self)\b",
+    r"\bdocument\s{0,3}\.\s{0,3}(cookie|write|location)\b",
+    r"String\.fromCharCode\s{0,3}\(",
+)), re.I | re.S)
+
+_DATEI = re.compile("|".join((
+    r"(\.\.[/\\]){2,}",
+    r"/etc/(passwd|shadow|hosts|group)\b",
+    r"/proc/(self|\d+)/",
+    r"/var/run/secrets",
+    r"\bc:[/\\]windows",
+    r"\b(win|boot)\.ini\b",
+    r"\b(file|gopher|dict|ldaps?|phar|expect|jar)://",
+    r"\bphp://(filter|input|stdin)",
+)), re.I | re.S)
+
+_BEFEHL = re.compile("|".join((
+    r"\$\{\s{0,3}(jndi|env|sys|java|script|base64|lower|upper)\s{0,3}:",
+    r"(?:;|\|\||\||&&|`|\$\()\s{0,3}"
+    r"(cat|ls|id|whoami|wget|curl|bash|sh|nc|ncat|uname|ping|powershell|"
+    r"cmd|python3?|perl|php)\b(?=[\s;|&)`]|$)",
+)), re.I | re.S)
+
+ABFRAGEMUSTER = (
+    ("sql_injektion", SPERREN, _SQL),
+    ("befehl_abfrage", SPERREN, _BEFEHL),
+    ("dateizugriff_abfrage", SPERREN, _DATEI),
+    ("skript_injektion", SPERREN, _SKRIPT),
 )
 
 
@@ -594,6 +776,17 @@ class IrHttp(models.AbstractModel):
             return cls._rbl_abweisen(Parameter)
 
         muster, stufe = cls._rbl_muster(path_info, Parameter)
+
+        # Die Abfragezeichenfolge: SQL-, Skript-, Datei- und
+        # Befehlseinschleusung. Sie gilt, wenn der PFAD nichts Schwereres
+        # ergeben hat.
+        pfad_buchung = path_info
+        if not muster or stufe != SPERREN:
+            abfrage_muster, abfrage_stufe, abfrage_text = \
+                cls._rbl_abfragemuster(Parameter)
+            if abfrage_muster:
+                muster, stufe = abfrage_muster, abfrage_stufe
+                pfad_buchung = ((path_info or "") + "?" + abfrage_text)[:250]
 
         # LAENDERREGEL -- nur, wenn jemand eine angelegt hat.
         #
@@ -786,7 +979,7 @@ class IrHttp(models.AbstractModel):
                 if isinstance(umgebung, dict):
                     umgebung["web_rbl.gebucht"] = True
                 Eintrag.treffer_eigene_transaktion(
-                    adresse, path_info, muster, host, stufe, kennung,
+                    adresse, pfad_buchung, muster, host, stufe, kennung,
                     land)
             if stufe != SPERREN:
                 # "zaehlen" und "melden" lassen durch. Ein defekter
@@ -1012,6 +1205,33 @@ class IrHttp(models.AbstractModel):
                     stufe = gesetzt
             return "pflichtseite_fehlt", stufe
         return "", ""
+
+    @classmethod
+    def _rbl_abfragemuster(cls, Parameter=None):
+        """(Name, Stufe, dekodierte Abfrage) des ersten Treffers, sonst ("", "", "")."""
+        try:
+            roh = request.httprequest.query_string or b""
+        except Exception:  # noqa: BLE001
+            return "", "", ""
+        if not roh:
+            return "", "", ""
+        from urllib.parse import unquote_plus
+        # Hoechstens 4 KB: Die Muster sind beschraenkt, aber das
+        # Schutzmodul soll keine Anfrage von Megabyte-Laenge zerlegen.
+        text = roh[:4096].decode("utf-8", "replace")
+        # Zweimal dekodieren, damit %2527 nicht als harmlos durchgeht.
+        text = unquote_plus(unquote_plus(text)).replace("\x00", "")
+        for name, vorgabe, regel in ABFRAGEMUSTER:
+            if not regel.search(text):
+                continue
+            stufe = vorgabe
+            if Parameter is not None:
+                gesetzt = Parameter.get_param(f"web_rbl.muster.{name}")
+                if gesetzt in (SPERREN, ZAEHLEN, MELDEN):
+                    stufe = gesetzt
+            kurz = re.sub(r"[\x00-\x1f\x7f]", " ", text)[:160]
+            return name, stufe, kurz
+        return "", "", ""
 
     @classmethod
     def _rbl_falle_pfad_sicherstellen(cls):
