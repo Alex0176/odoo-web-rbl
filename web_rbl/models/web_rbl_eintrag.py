@@ -182,6 +182,10 @@ class WebRblEintrag(models.Model):
         "systempfad": 40,
         "sicherung": 25,
         "schnittstellensuche": 25,
+        "cms_fremd": 25,
+        "cms_abfrage": 25,
+        "geraetesonde": 30,
+        "editor_konfig": 30,
         "ki_schnittstelle": 15,  # sucht eine verwaiste KI-Anbindung, kein eigener Angriff
         # Datenbankverwalter: sucht das Hauptkennwort, also den
         # Zugang zu ALLEN Datenbanken auf einmal.

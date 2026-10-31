@@ -167,6 +167,19 @@ BEFUND = {
                            "Verwaltungsoberflaechen fremder Software "
                            "(openapi.json, swagger, /console, actuator, "
                            "wp-json). Existiert bei Odoo nicht.",
+    "cms_fremd": "Pfade fremder Redaktionssysteme (Joomla, Drupal, "
+                 "TYPO3, Magento, OpenCart, PrestaShop). Eine Odoo-Seite "
+                 "hat keinen davon -- wer sie abruft, sucht eine "
+                 "verwundbare Erweiterung.",
+    "cms_abfrage": "Joomla-Aufruf (option=com_...) in der "
+                   "Abfragezeichenfolge. Odoo kennt diesen Parameter nicht.",
+    "geraetesonde": "Sondierung nach Anmeldeseiten und Verwaltungsschnitt"
+                    "stellen fremder Netzgeraete (Cisco ASA, F5, "
+                    "Fortinet, Palo Alto, Citrix, Pulse). Ein Odoo-Server "
+                    "ist keines davon.",
+    "editor_konfig": "Suche nach Resten von Entwicklungswerkzeugen "
+                     "(.vscode/sftp.json, .idea, .DS_Store, .htpasswd). "
+                     "Dort liegen oft FTP-Zugangsdaten.",
     "ausfuehrung": "Versuch, einen BEFEHL auszufuehren -- kein "
                    "Lesezugriff. Wer das probiert, will nicht sehen, "
                    "was da ist, sondern etwas tun. Der schwerste "
@@ -482,8 +495,8 @@ MUSTER = (
         r"(env|config|configuration|settings|environment|constants|"
         r"credentials|runtime-config|app-config|__env|push_config|"
         r"secrets?)\.(js|json|py|env|ya?ml|toml|ini|cfg|conf)($|\?)"
-        r"|^/api/(config|settings|env|account|4/config|"
-        r"console/[a-z_]+|session/properties)($|/|\?)"
+        r"|^(/[a-z0-9_-]{2,20})?/api/(config|settings|env|account|4/config|"
+        r"console/[a-z_]+|session/properties|setup/validate)($|/|\?)"
         r"|^/(v1/onboarding/config|__/firebase/|__api__/|api/sonicos/)",
         re.I)),
     # Zugangsdaten und Schluessel fremder Systeme, Shell-Dateien,
@@ -523,6 +536,34 @@ MUSTER = (
         r"|^/(actuator|debug/(vars|pprof)|_debugbar|server-status|"
         r"server-info|manage/(env|health|info|beans))($|/|\?)"
         r"|(^|/)(elmah|trace)\.axd($|\?)", re.I)),
+
+    # ---- FREMDE REDAKTIONSSYSTEME, GERAETE, EDITORRESTE ---------------
+    #
+    # Gemessen an 470 749 Abrufen aus 14 Tagen: kein einziger Treffer
+    # auf eine Seite, die es bei uns gibt. Diese Sonden kommen einzeln
+    # von wechselnden Adressen -- die Verhaltenserkennung (20 Fehler in
+    # 300 s) sieht sie nie, nur das Pfadmuster faengt sie beim ersten
+    # Abruf. Verankert mit ``^``, damit ein Odoo-Modul unter
+    # /<modul>/static/... nicht getroffen wird. ``/modules/`` und
+    # ``/plugins/`` allein stehen bewusst NICHT drin.
+    ("cms_fremd", SPERREN, re.compile(
+        r"^/(administrator(/|$)|media/system/js/|components/com_[a-z0-9_]+|"
+        r"plugins/(system|content|editors)/[a-z0-9_]+/|"
+        r"sites/(default|all)/|core/(misc|install\.php)|"
+        r"catalog/view/theme/|skin/(frontend|adminhtml)/|downloader(/|$)|"
+        r"typo3(conf|temp)?(/|$)|fileadmin/|smiley/1\.gif$|misc/drupal\.js|"
+        r"CHANGELOG\.txt$|"
+        r"modules/[a-z0-9_.-]+/(upload|uploads|slides|ajax|file_uploads|"
+        r"lang|js|views|controllers)(/|$))", re.I)),
+    ("geraetesonde", SPERREN, re.compile(
+        r"^(/\+CSCO[A-Z]\+/|/my\.policy$|/HNAP1/?$|/api/v1/vpnportal/|"
+        r"/enhancecp|/dana-na/|/remote/(login|logincheck)|"
+        r"/global-protect/|/vpn/index\.html|/mgmt/tm/|/sig1\.htm$)",
+        re.I)),
+    ("editor_konfig", SPERREN, re.compile(
+        r"(^|/)(\.vscode/|\.idea/|sftp-config\.json$|sftp\.json$|"
+        r"\.ftpconfig$|\.DS_Store$|\.npmrc$|\.htpasswd$|"
+        r"\.bash_history$)", re.I)),
 )
 
 # ---- DIE ABFRAGEZEICHENFOLGE --------------------------------------------
@@ -593,11 +634,14 @@ _BEFEHL = re.compile("|".join((
     r"cmd|python3?|perl|php)\b(?=[\s;|&)`]|$)",
 )), re.I | re.S)
 
+_JOOMLA = re.compile(r"(^|[?&])option=com_[a-z0-9_]+", re.I)
+
 ABFRAGEMUSTER = (
     ("sql_injektion", SPERREN, _SQL),
     ("befehl_abfrage", SPERREN, _BEFEHL),
     ("dateizugriff_abfrage", SPERREN, _DATEI),
     ("skript_injektion", SPERREN, _SKRIPT),
+    ("cms_abfrage", SPERREN, _JOOMLA),
 )
 
 
