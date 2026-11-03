@@ -47,6 +47,8 @@ import secrets
 
 from odoo import _, api, fields, models
 
+from .web_rbl_herkunft import sichere_sprache
+
 _logger = logging.getLogger(__name__)
 
 PARAM_AKTIV = "web_rbl.koeder_aktiv"
@@ -269,6 +271,7 @@ class WebRblKoeder(models.Model):
         koeder = self.sudo().search([("kanarie", "=", teil)], limit=1)
         if not koeder:
             return self.browse()
+        self = sichere_sprache(self)
 
         # NUR LESEN. Das Vermerken geschieht in
         # ``hochrisiko_eigene_transaktion`` mit eigenem Cursor -- diese

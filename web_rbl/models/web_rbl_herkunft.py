@@ -66,6 +66,16 @@ from odoo.tools import config
 _logger = logging.getLogger(__name__)
 _LETZTE_WARNUNG = {}
 
+
+def sichere_sprache(modell):
+    """``_()`` liest die Sprache aus dem Kontext und wirft UserError bei einem
+    Code, der in Odoo nicht installiert ist (z. B. Browsersprache de_AT).
+    Eine Schutzprüfung darf daran nicht scheitern."""
+    lang = modell.env.context.get("lang")
+    if lang and lang != "en_US" and not modell.env["res.lang"]._get_data(code=lang):
+        return modell.with_context(lang="de_DE")
+    return modell
+
 # Niemals sperren. Trifft nur eigene Infrastruktur.
 NIE_SPERREN = (
     "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16",   # RFC 1918
@@ -89,6 +99,7 @@ class WebRblHerkunft(models.AbstractModel):
         Wird sowohl beim Sperren gefragt als auch in der Oberfläche
         angezeigt. Der Grund ist Klartext und für Menschen gedacht.
         """
+        self = sichere_sprache(self)
         if not request:
             return False, _("Kein Web-Zugriff.")
 
@@ -145,6 +156,7 @@ class WebRblHerkunft(models.AbstractModel):
     @api.model
     def adresse(self):
         """Die Adresse des Besuchers, oder "" wenn sie unklar ist."""
+        self = sichere_sprache(self)
         if request and config.get("proxy_mode") and self._vertraute_netze():
             adresse, grund = self._adresse_hinter_proxy()
             if not adresse:
@@ -188,6 +200,7 @@ class WebRblHerkunft(models.AbstractModel):
         ProxyFix springt sonst nicht an) und unabhaengig davon, ob ein
         weiterer Zwischenproxy (z. B. Cloudflare) davorsitzt.
         """
+        self = sichere_sprache(self)
         umgebung = request.httprequest.environ
         orig = umgebung.get("werkzeug.proxy_fix.orig") or {}
         partner = (orig.get("REMOTE_ADDR") or umgebung.get("REMOTE_ADDR") or "").strip()
