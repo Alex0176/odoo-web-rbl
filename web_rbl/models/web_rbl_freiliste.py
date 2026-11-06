@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# Copyright 2026 Biricon IT Services e.u
+# Copyright 2026 Biricon IT Services GmbH
 # License AGPL-3.0 or later (http://www.gnu.org/licenses/agpl).
 """Die Freiliste: Adressen und Netze, die NIE gesperrt werden.
 
