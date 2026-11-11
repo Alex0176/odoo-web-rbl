@@ -23,7 +23,7 @@ Dieses Modul erkennt solche Anfragen am frühestmöglichen Punkt, führt
 Buch und kann die Quelle sperren. Die Sperrliste wird als schlichte
 Textliste veröffentlicht, wie HAProxy, nftables und ipset sie lesen.
     """,
-    "version": "19.0.1.0.0",
+    "version": "19.0.1.1.0",
     "category": "Website",
     "author": "Biricon IT Services GmbH",
     "website": "https://www.biricon.eu/",

@@ -135,6 +135,8 @@ ein Signal. Wer das einschaltet, soll es bewusst tun.
 | `web_rbl.verdacht_ruhe_stunden` | `24` | Gelungene Anmeldung von auffälliger Adresse: nach einer Meldung bleibt dieselbe Adresse so lange still. `0` meldet jede Anmeldung |
 | `web_rbl.geolite2_schluessel` | — | MaxMind-Lizenzschlüssel (kostenlos, Konto nötig). Gesetzt, holt ein wöchentlicher Cron die GeoLite2-Datei selbst an den Ort aus `geoip_country_db` — das Verzeichnis muss dem Odoo-Benutzer gehören |
 | `web_rbl.geolite2_ausgabe` | `GeoLite2-Country` | Welche Ausgabe geholt wird; `GeoLite2-City` geht auch, ist aber sechsmal größer und für Länderregeln ohne Nutzen |
+| `web_rbl.security_headers` | `1` | Sicherheits-Header (siehe unten) setzen |
+| `web_rbl.security_hsts` | `1` | Darin: HSTS nur bei HTTPS senden |
 | `web_rbl.geolite2_stand` | — | Wird vom Cron gesetzt: Erstellungsdatum der abgelegten Datei |
 
 ## Die drei Stufen
@@ -234,6 +236,41 @@ derselben Adresse sind das Kennzeichen des Rundumschlags.
 Wird ein Parameter von außerhalb des laufenden Prozesses gesetzt (etwa
 über `odoo-bin shell`), greift er erst nach einem Neustart. Über die
 Oberfläche geändert wirkt er sofort.
+
+## Sicherheits-Header
+
+Seit 19.0.1.1.0 setzt das Modul (Datei `models/ir_http_sicherheit.py`, über
+`ir.http._post_dispatch`, also auch für Antworten aus einem Seitencache)
+Antwortheader auf Webseiten- und Asset-Antworten:
+
+- `Strict-Transport-Security: max-age=31536000` (nur bei HTTPS, ohne
+  `includeSubDomains` und ohne `preload`)
+- `Referrer-Policy: strict-origin-when-cross-origin`
+- `Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=()`;
+  unter `/fahrer` sind Kamera und Standort der eigenen Herkunft erlaubt
+- nur bei HTML: `X-Frame-Options: SAMEORIGIN` und
+  `Content-Security-Policy: frame-ancestors 'self'` (nur wenn kein CSP-Header
+  oder `frame-ancestors` vorhanden ist)
+- `Server: odoo` statt der Versionsangabe des HTTP-Servers
+- Cookies bei HTTPS: `session_id` und `frontend_lang` bekommen `Secure`,
+  `frontend_lang` zusätzlich `SameSite=Lax`. Das Sitzungscookie behält den
+  Browser-Standard bei `SameSite`, damit der Rücksprung von Zahlungsanbietern
+  die Sitzung nicht verliert.
+
+Unberührt bleiben Backend und Schnittstellen (`/odoo`, `/web/...` außer
+`/web/assets`, `/web/image`, `/web/static`, `/web/content`, `/websocket`,
+`/jsonrpc`, `/xmlrpc`, `/mail`, `/api`, `/json`, `/calendar`). Bereits
+gesetzte Header werden nie überschrieben.
+
+**Bewusst nicht erzwungen: eine vollständige Content-Security-Policy.**
+Odoo-Seiten und der Website-Builder brauchen Inline-Skripte und `eval`,
+Drittinhalte (Karten, Videos, Zahlungsanbieter) kommen aus wechselnden
+Quellen. Eine strenge Richtlinie würde Seiten brechen, eine nachgiebige
+(`unsafe-inline`) schützt kaum. Deshalb nur `frame-ancestors`.
+
+Abschalten: `web_rbl.security_headers` = `0`; nur HSTS: `web_rbl.security_hsts`
+= `0`. Beim Update werden Werte des früheren Moduls `website_security_headers`
+übernommen, falls gesetzt. Das Sperr- und Meldeverhalten ist unabhängig davon.
 
 ## Lizenz
 
