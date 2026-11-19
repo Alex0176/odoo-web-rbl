@@ -69,7 +69,14 @@ gar keines.
 Liste abholen (Token aus `web_rbl.token`):
 
     curl -s -o /etc/haproxy/rbl.lst \
-      "https://www.example.com/web_rbl/liste?token=DEIN_TOKEN"
+      -H "Authorization: Bearer DEIN_TOKEN" \
+      "https://www.example.com/web_rbl/liste"
+
+Der Token gehört in den Kopf `Authorization: Bearer …`, nicht in die Adresse:
+Abnehmer protokollieren die Adresse, und der Token stünde dort im Klartext.
+Kann ein Abnehmer keinen Kopf mitschicken (manche Firewalls), lässt sich der
+alte Weg `?token=…` mit dem Systemparameter `web_rbl.token_url_erlaubt = 1`
+wieder zulassen.
 
 In der `haproxy.cfg`:
 
@@ -107,7 +114,7 @@ Kommt der Abruf von einer **anderen** Adresse als der, die den Köder
 bekam, sind die Daten weitergegeben worden. Das steht dann im Eintrag,
 samt Herkunft.
 
-    /web_rbl/liste/hochrisiko?token=…
+    /web_rbl/liste/hochrisiko   (Token wie oben im Kopf)
 
 Getrennt von der Hauptliste, weil die Folgen andere sind: Auf der
 großen Liste stehen auch Adressen, die morgen jemand anderem gehören.

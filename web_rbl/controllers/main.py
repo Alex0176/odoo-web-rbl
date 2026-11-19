@@ -17,8 +17,10 @@ einen Parser gekostet.
 
 ZUGANG
 ------
-Der Endpunkt ist öffentlich erreichbar, aber über einen Token in der
-Adresse geschützt (``web_rbl.token``). Eine Sperrliste ist kein
+Der Endpunkt ist öffentlich erreichbar, aber über einen Token im Kopf
+``Authorization: Bearer <token>`` geschützt (``web_rbl.token``). Der
+Token in der Adresse wird abgelehnt, weil Abnehmer die Adresse
+protokollieren. Eine Sperrliste ist kein
 Geheimnis -- wer sie liest, erfährt nur, wer uns angegriffen hat. Der
 Token verhindert, dass sie beiläufig eingesammelt und anderswo
 eingespielt wird: Unsere Beobachtung ist unsere Beobachtung, und eine
@@ -126,17 +128,37 @@ class WebRblController(http.Controller):
 
     # ------------------------------------------------------------------
     def _token_gueltig(self, token):
-        erwartet = request.env["ir.config_parameter"].sudo().get_param(
-            "web_rbl.token")
+        """Prueft den Token aus dem Kopf ``Authorization: Bearer <token>``.
+
+        Der Token in der Adresse (``?token=``) wird abgelehnt, weil
+        Abnehmer wie OPNsense die ganze Adresse protokollieren und der
+        Token so im Klartext in Protokollen landet. Uebergangsweise laesst
+        sich der alte Weg mit ``web_rbl.token_url_erlaubt = 1`` wieder
+        einschalten.
+        """
+        param = request.env["ir.config_parameter"].sudo().get_param
+        erwartet = param("web_rbl.token")
         if not erwartet:
             _logger.warning(
                 "Web RBL: Es ist kein Token gesetzt (web_rbl.token) -- die "
                 "Liste wird nicht ausgeliefert.")
             return False
+        import hmac
+        kopf = request.httprequest.headers.get("Authorization", "")
+        schema, _sep, wert = kopf.partition(" ")
+        angebotene = []
+        if schema.lower() == "bearer" and wert.strip():
+            angebotene.append(wert.strip())
+        elif token and param("web_rbl.token_url_erlaubt") == "1":
+            angebotene.append(str(token))
+        elif token:
+            # Den Wert nie protokollieren, nur dass er in der Adresse kam.
+            _logger.warning(
+                "Web RBL: Token in der Adresse abgelehnt -- bitte "
+                "Authorization: Bearer verwenden.")
         # Vergleich in konstanter Zeit, damit sich der Token nicht über
         # die Antwortdauer erraten laesst.
-        import hmac
-        return hmac.compare_digest(str(token or ""), str(erwartet))
+        return any(hmac.compare_digest(a, str(erwartet)) for a in angebotene)
 
     def _gesperrte(self):
         """Die Adressen, eine je Zeile, sortiert."""
