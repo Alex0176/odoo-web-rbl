@@ -1172,6 +1172,15 @@ class IrHttp(models.AbstractModel):
     FEHLENDE_SEITEN = re.compile(
         r"/(impressum|imprint|datenschutz|legal)([./]|$)", re.I)
 
+    # Statische Dateien sind keine Seiten: Ein Bild, ein Stylesheet oder eine
+    # Schrift mit "datenschutz" im Namen (z. B. /fleet365/bilder/datenschutz.svg,
+    # das eine echte Seite einbindet) ruft ein normaler Browser von selbst ab.
+    # Fehlt so eine Datei, darf das nie zu einer Sperre fuehren -- sonst
+    # sperrt sich ein echter Besucher durch das blosse Laden der Seite aus.
+    STATISCHE_DATEIEN = re.compile(
+        r"\.(svg|png|jpe?g|gif|webp|avif|ico|bmp|css|js|map|woff2?|ttf|otf|eot)$",
+        re.I)
+
     @classmethod
     def _rbl_muster(cls, pfad, Parameter=None):
         """(Name, Stufe) des ersten zutreffenden Musters, sonst ("", "").
@@ -1240,7 +1249,8 @@ class IrHttp(models.AbstractModel):
         # Kein Muster getroffen -- aber vielleicht eine Seite, die es
         # hier gar nicht gibt. Diese Pruefung steht ganz unten, damit
         # sie nie einem echten Muster vorgreift.
-        if cls.FEHLENDE_SEITEN.search(pfad):
+        if (cls.FEHLENDE_SEITEN.search(pfad)
+                and not cls.STATISCHE_DATEIEN.search(pfad.split("?", 1)[0])):
             stufe = ZAEHLEN
             if Parameter is not None:
                 gesetzt = Parameter.get_param(
